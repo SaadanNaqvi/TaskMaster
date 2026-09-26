@@ -1,9 +1,15 @@
+import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Exercise } from '../models/exercise';
+import { File } from 'expo-file-system';
+
+/** expo-file-system's legacy API has no web implementation at all (it throws on every call),
+ * so every entry point here short-circuits on web instead of crashing the screen that calls it. */
+const IS_WEB = Platform.OS === 'web';
 
 export interface ExerciseClip {
   id: string;
-  exercise: Exercise;
+  /** Backend exercise id, e.g. "squat". */
+  exercise: string;
   fileName: string;
   dateRecorded: string;
   durationSeconds: number;
@@ -13,6 +19,7 @@ const CLIPS_DIR = `${FileSystem.documentDirectory}ReferenceClips/`;
 const INDEX_PATH = `${CLIPS_DIR}index.json`;
 
 async function ensureDir(): Promise<void> {
+  if (IS_WEB) return;
   const info = await FileSystem.getInfoAsync(CLIPS_DIR);
   if (!info.exists) {
     await FileSystem.makeDirectoryAsync(CLIPS_DIR, { intermediates: true });
@@ -20,6 +27,7 @@ async function ensureDir(): Promise<void> {
 }
 
 export async function loadClips(): Promise<ExerciseClip[]> {
+  if (IS_WEB) return [];
   await ensureDir();
   const info = await FileSystem.getInfoAsync(INDEX_PATH);
   if (!info.exists) return [];
@@ -39,14 +47,27 @@ export function clipFileUri(clip: ExerciseClip): string {
   return `${CLIPS_DIR}${clip.fileName}`;
 }
 
+/**
+ * A real `File` (from expo-file-system's modern API, not the legacy one) around a saved clip.
+ * Expo's fetch/FormData implementation rejects plain `{uri,name,type}` descriptors outright
+ * ("Unsupported FormDataPart implementation") — it only accepts a Blob or something with
+ * `.bytes()`, which this class provides.
+ */
+export function clipUploadFile(clip: ExerciseClip): File {
+  return new File(clipFileUri(clip));
+}
+
 /** Moves a just-recorded temp file into the library and appends it to index.json. */
 export async function addClip(
   tempUri: string,
-  exercise: Exercise,
+  exercise: string,
   durationSeconds: number
 ): Promise<ExerciseClip> {
+  if (IS_WEB) throw new Error('Recording clips is not supported on web — use the Expo Go app on your phone.');
   await ensureDir();
-  const fileName = `${exercise.replace(/\s+/g, '_')}_${Date.now()}.mov`;
+  const sourceExt = tempUri.split('.').pop()?.toLowerCase();
+  const ext = sourceExt && ['mov', 'mp4', 'm4v'].includes(sourceExt) ? sourceExt : 'mp4';
+  const fileName = `${exercise}_${Date.now()}.${ext}`;
   const destination = `${CLIPS_DIR}${fileName}`;
   await FileSystem.moveAsync({ from: tempUri, to: destination });
 
@@ -65,6 +86,7 @@ export async function addClip(
 }
 
 export async function deleteClip(clip: ExerciseClip): Promise<void> {
+  if (IS_WEB) return;
   await FileSystem.deleteAsync(clipFileUri(clip), { idempotent: true });
   const clips = (await loadClips()).filter((c) => c.id !== clip.id);
   await saveClips(clips);

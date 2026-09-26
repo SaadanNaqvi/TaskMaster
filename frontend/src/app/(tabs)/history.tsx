@@ -40,14 +40,13 @@ export default function HistoryScreen() {
               <Text style={styles.emptyText}>Sessions you run through the full form check show up here.</Text>
             ) : (
               history.map((item) => {
-                const scoreColor = item.overallScore >= 75 ? colors.lime : item.overallScore >= 60 ? colors.amber : colors.red;
+                const score = Math.round(item.result.form_report.score);
+                const scoreColor = score >= 75 ? colors.lime : score >= 60 ? colors.amber : colors.red;
                 return (
                   <Pressable
-                    key={item.id}
+                    key={item.jobId}
                     style={styles.sessionRow}
-                    onPress={() =>
-                      router.push(`/results/${encodeURIComponent(item.exercise)}?referenceId=${item.reference.id}&clipId=${encodeURIComponent(item.id)}`)
-                    }
+                    onPress={() => router.push(`/results/${item.jobId}`)}
                   >
                     <View style={styles.sessionThumb}>
                       <Svg viewBox="100 110 170 340" width={44} height={44}>
@@ -55,10 +54,10 @@ export default function HistoryScreen() {
                       </Svg>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.sessionTitle}>{item.exercise} vs {item.reference.name}</Text>
-                      <Text style={styles.sessionSubtitle}>{new Date(item.createdAt).toLocaleString()} · {item.repCount} reps</Text>
+                      <Text style={styles.sessionTitle}>{item.exerciseName} vs {item.referenceName}</Text>
+                      <Text style={styles.sessionSubtitle}>{new Date(item.createdAt).toLocaleString()}</Text>
                     </View>
-                    <Text style={[styles.sessionScore, { color: scoreColor }]}>{item.overallScore}</Text>
+                    <Text style={[styles.sessionScore, { color: scoreColor }]}>{score}</Text>
                   </Pressable>
                 );
               })
@@ -75,7 +74,7 @@ export default function HistoryScreen() {
           <Card style={styles.clipRow}>
             <Pressable style={styles.clipMain} onPress={() => setPlayingUri(clipFileUri(item))}>
               <View>
-                <Text style={styles.clipTitle}>{item.exercise}</Text>
+                <Text style={styles.clipTitle}>{item.exercise.charAt(0).toUpperCase() + item.exercise.slice(1)}</Text>
                 <Text style={styles.clipSubtitle}>
                   {new Date(item.dateRecorded).toLocaleString()} · {item.durationSeconds.toFixed(1)}s
                 </Text>

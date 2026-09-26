@@ -1,6 +1,5 @@
 import React from 'react';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
-import { Exercise } from '../../models/exercise';
 
 interface IconProps {
   size?: number;
@@ -65,16 +64,34 @@ export function LatPulldownIcon({ size = 26, color = '#fff' }: IconProps) {
   );
 }
 
-export const EXERCISE_ICONS: Record<Exercise, React.FC<IconProps>> = {
-  Squat: SquatIcon,
-  'Bench Press': BenchIcon,
-  Deadlift: DeadliftIcon,
-  'Lat Pulldown': LatPulldownIcon,
-};
+export function DumbbellIcon({ size = 26, color = '#fff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 40 40" {...common} stroke={color} strokeWidth={2.4}>
+      <Path d="M11 20h18" />
+      <Rect x="4" y="14" width="6" height="12" rx="2" />
+      <Rect x="30" y="14" width="6" height="12" rx="2" />
+      <Rect x="8" y="17" width="3" height="6" rx="1" />
+      <Rect x="29" y="17" width="3" height="6" rx="1" />
+    </Svg>
+  );
+}
 
-export const EXERCISE_ACCENTS: Record<Exercise, string> = {
-  Squat: '#C8F53C',
-  'Bench Press': '#5AC8FA',
-  Deadlift: '#FFB547',
-  'Lat Pulldown': '#B18CFF',
-};
+/** Backend exercise ids are open-ended snake_case slugs — match by substring with a generic fallback
+ * so new exercises the API adds later still render sensibly without a code change. */
+export function getExerciseIcon(id: string): React.FC<IconProps> {
+  const key = id.toLowerCase();
+  if (key.includes('squat')) return SquatIcon;
+  if (key.includes('bench')) return BenchIcon;
+  if (key.includes('dead')) return DeadliftIcon;
+  if (key.includes('lat') || key.includes('pulldown')) return LatPulldownIcon;
+  return DumbbellIcon;
+}
+
+export function getExerciseAccent(id: string): string {
+  const key = id.toLowerCase();
+  if (key.includes('squat')) return '#C8F53C';
+  if (key.includes('bench')) return '#5AC8FA';
+  if (key.includes('dead')) return '#FFB547';
+  if (key.includes('lat') || key.includes('pulldown')) return '#B18CFF';
+  return '#8A93A0';
+}

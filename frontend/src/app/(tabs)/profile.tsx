@@ -21,9 +21,9 @@ export default function ProfileScreen() {
     }, [])
   );
 
-  const bestScore = history.reduce((max, h) => Math.max(max, h.overallScore), 0);
+  const bestScore = Math.round(history.reduce((max, h) => Math.max(max, h.result.form_report.score), 0));
   const exerciseCounts = history.reduce<Record<string, number>>((acc, h) => {
-    acc[h.exercise] = (acc[h.exercise] ?? 0) + 1;
+    acc[h.exerciseName] = (acc[h.exerciseName] ?? 0) + 1;
     return acc;
   }, {});
   const topExercise = Object.entries(exerciseCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';

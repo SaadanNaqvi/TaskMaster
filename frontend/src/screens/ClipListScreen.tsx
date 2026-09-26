@@ -5,13 +5,12 @@ import Card from '../components/ui/Card';
 import ScreenHeader from '../components/ui/ScreenHeader';
 import { ShareIcon, CheckIcon } from '../components/icons/MiscIcons';
 import VideoPlayerModal from '../components/VideoPlayerModal';
-import { Exercise } from '../models/exercise';
 import { ExerciseClip, clipFileUri, deleteClip } from '../services/clipLibrary';
 import { colors } from '../theme/colors';
 import { font } from '../theme/typography';
 
 interface Props {
-  exercise: Exercise;
+  exercise: string;
   clips: ExerciseClip[];
   onBack: () => void;
   onDeleted: () => Promise<void> | void;

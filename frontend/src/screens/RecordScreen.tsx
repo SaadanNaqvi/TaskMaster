@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import { Exercise, framingHint } from '../models/exercise';
-import { ReferenceOption } from '../models/reference';
+import { framingHint } from '../models/exercise';
 import { addClip } from '../services/clipLibrary';
+import { startJobFromClip } from '../services/jobs';
+import { ApiRequestError } from '../services/apiGateway';
 import FramingGuideOverlay from '../components/FramingGuideOverlay';
 import ScreenHeader from '../components/ui/ScreenHeader';
 import Chip from '../components/ui/Chip';
@@ -14,11 +15,13 @@ import { REF_JOINTS } from '../components/anatomy/joints';
 import Svg from 'react-native-svg';
 
 interface Props {
-  exercise: Exercise;
-  reference: ReferenceOption;
+  exercise: string;
+  exerciseName: string;
+  referenceId: string;
+  referenceName: string;
   onBack: () => void;
   onOpenLibrary: () => void;
-  onRecorded: (clipId: string) => void;
+  onJobStarted: (jobId: string) => void;
 }
 
 function formatElapsed(seconds: number): string {
@@ -27,12 +30,20 @@ function formatElapsed(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function RecordScreen({ exercise, reference, onBack, onOpenLibrary, onRecorded }: Props) {
+export default function RecordScreen({
+  exercise,
+  exerciseName,
+  referenceId,
+  referenceName,
+  onBack,
+  onOpenLibrary,
+  onJobStarted,
+}: Props) {
   const cameraRef = useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const [isRecording, setIsRecording] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [zoomedIn, setZoomedIn] = useState(false);
   const recordingStartedAt = useRef(0);
@@ -51,6 +62,10 @@ export default function RecordScreen({ exercise, reference, onBack, onOpenLibrar
   }, [isRecording]);
 
   const handlePress = async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Phone only', 'Recording a set only works in the Expo Go app on your phone right now — use "Upload" if you already have a clip in this browser session, or switch devices.');
+      return;
+    }
     if (isRecording) {
       cameraRef.current?.stopRecording();
       return;
@@ -64,16 +79,25 @@ export default function RecordScreen({ exercise, reference, onBack, onOpenLibrar
       const result = await cameraRef.current.recordAsync();
       setIsRecording(false);
       if (result?.uri) {
-        setIsSaving(true);
+        setBusyLabel('Saving clip…');
         const durationSeconds = (Date.now() - recordingStartedAt.current) / 1000;
         const clip = await addClip(result.uri, exercise, durationSeconds);
-        setIsSaving(false);
-        onRecorded(clip.id);
+
+        setBusyLabel('Uploading to TaskMaster…');
+        const jobId = await startJobFromClip(clip, referenceId);
+        setBusyLabel(null);
+        onJobStarted(jobId);
       }
     } catch (error) {
       setIsRecording(false);
-      setIsSaving(false);
-      Alert.alert('Recording failed', error instanceof Error ? error.message : String(error));
+      setBusyLabel(null);
+      const message =
+        error instanceof ApiRequestError
+          ? `Upload failed: ${error.message}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      Alert.alert('Something went wrong', message);
     }
   };
 
@@ -85,7 +109,7 @@ export default function RecordScreen({ exercise, reference, onBack, onOpenLibrar
         </Svg>
         <Text style={styles.permissionTitle}>Camera access needed</Text>
         <Text style={styles.permissionText}>
-          TaskMaster needs your camera and microphone to record a side-on set to compare against {reference.name}.
+          TaskMaster needs your camera and microphone to record a side-on set to compare against {referenceName}.
         </Text>
       </View>
     );
@@ -99,11 +123,11 @@ export default function RecordScreen({ exercise, reference, onBack, onOpenLibrar
       <View style={styles.topOverlay}>
         <ScreenHeader
           onBack={onBack}
-          title={exercise}
+          title={exerciseName}
           transparent
           right={
             <Chip background="rgba(0,0,0,0.5)" color={isRecording ? colors.red : colors.text} dot={isRecording ? colors.red : undefined}>
-              {isRecording ? formatElapsed(elapsed) : `vs ${reference.name.split(' ')[0]}`}
+              {isRecording ? formatElapsed(elapsed) : `vs ${referenceName.split(' ')[0]}`}
             </Chip>
           }
         />
@@ -125,7 +149,7 @@ export default function RecordScreen({ exercise, reference, onBack, onOpenLibrar
             <Text style={styles.sideLabel}>Upload</Text>
           </Pressable>
 
-          <Pressable style={styles.recordButton} onPress={handlePress} disabled={isSaving}>
+          <Pressable style={styles.recordButton} onPress={handlePress} disabled={!!busyLabel}>
             <View style={isRecording ? styles.stopIcon : styles.recordIcon} />
           </Pressable>
 
@@ -138,9 +162,9 @@ export default function RecordScreen({ exercise, reference, onBack, onOpenLibrar
         </View>
       </View>
 
-      {isSaving && (
+      {busyLabel && (
         <View style={styles.savingOverlay}>
-          <Text style={styles.savingText}>Saving clip…</Text>
+          <Text style={styles.savingText}>{busyLabel}</Text>
         </View>
       )}
     </View>

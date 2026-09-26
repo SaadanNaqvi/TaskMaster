@@ -3,6 +3,7 @@
     "name": "TaskMaster Recorder",
     "slug": "mobile",
     "version": "1.0.0",
+    "scheme": "taskmaster",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

@@ -1,32 +1,33 @@
 import React from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import RecordScreen from '../../screens/RecordScreen';
-import { EXERCISES, Exercise } from '../../models/exercise';
-import { findReference } from '../../models/reference';
 import Screen from '../../components/ui/Screen';
 
 export default function RecordRoute() {
-  const { exercise: exerciseParam, referenceId } = useLocalSearchParams<{
+  const { exercise, referenceId, referenceName, exerciseName } = useLocalSearchParams<{
     exercise: string;
-    referenceId?: string;
+    referenceId: string;
+    referenceName: string;
+    exerciseName?: string;
   }>();
   const router = useRouter();
-
-  const exercise = (EXERCISES.find((e) => e === exerciseParam) ?? EXERCISES[0]) as Exercise;
-  const reference = findReference(exercise, referenceId);
 
   return (
     <Screen bare edges={[]}>
       <RecordScreen
         exercise={exercise}
-        reference={reference}
+        exerciseName={exerciseName ?? exercise}
+        referenceId={referenceId}
+        referenceName={referenceName ?? 'the reference'}
         onBack={() => router.back()}
         onOpenLibrary={() =>
-          router.push(`/clips/${encodeURIComponent(exercise)}?mode=pick&referenceId=${reference.id}`)
+          router.push(
+            `/clips/${exercise}?mode=pick&referenceId=${referenceId}&referenceName=${encodeURIComponent(referenceName ?? '')}&exerciseName=${encodeURIComponent(exerciseName ?? exercise)}`
+          )
         }
-        onRecorded={(clipId) =>
+        onJobStarted={(jobId) =>
           router.replace(
-            `/processing/${encodeURIComponent(exercise)}?referenceId=${reference.id}&clipId=${encodeURIComponent(clipId)}`
+            `/processing/${jobId}?exercise=${exercise}&exerciseName=${encodeURIComponent(exerciseName ?? exercise)}&referenceId=${referenceId}&referenceName=${encodeURIComponent(referenceName ?? '')}`
           )
         }
       />

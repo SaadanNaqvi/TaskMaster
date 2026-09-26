@@ -18,8 +18,8 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="reference/[exercise]" />
         <Stack.Screen name="record/[exercise]" />
-        <Stack.Screen name="processing/[exercise]" options={{ gestureEnabled: false }} />
-        <Stack.Screen name="results/[exercise]" />
+        <Stack.Screen name="processing/[jobId]" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="results/[jobId]" />
         <Stack.Screen name="clips/[exercise]" />
       </Stack>
     </AnalysisProvider>

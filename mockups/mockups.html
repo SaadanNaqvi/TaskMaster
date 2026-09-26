@@ -1,0 +1,199 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:Inter;src:url(inter/InterVariable.ttf);font-weight:100 900}
+:root{--bg:#0B0D10;--s1:#14171C;--s2:#1C2026;--s3:#262B33;--tx:#F2F4F7;--mu:#8A93A0;--lime:#C8F53C;--red:#FF5A5F;--amb:#FFB547;--cy:#5AC8FA}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#E9ECEF;font-family:Inter,sans-serif;color:var(--tx);padding:60px;-webkit-font-smoothing:antialiased}
+.grid{display:grid;grid-template-columns:repeat(3,430px);gap:56px 48px}
+.cap{color:#1B1F24;margin-top:18px;text-align:center}
+.cap b{display:block;font-size:17px}.cap span{font-size:13px;color:#5B6470}
+.phone{width:430px;height:884px;background:#050607;border-radius:64px;padding:20px;box-shadow:0 30px 60px rgba(0,0,0,.25),inset 0 0 0 2px #2a2e34}
+.scr{width:390px;height:844px;background:var(--bg);border-radius:46px;overflow:hidden;position:relative}
+.island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:124px;height:36px;background:#000;border-radius:20px;z-index:20}
+.sb{height:54px;display:flex;justify-content:space-between;align-items:center;padding:6px 34px 0 40px;font-weight:600;font-size:16px;position:relative;z-index:10}
+.sb i{font-style:normal;letter-spacing:1px;font-size:12px}
+.home-ind{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:#fff;opacity:.85;z-index:20}
+.pad{padding:0 20px}
+h1{font-size:30px;font-weight:750;letter-spacing:-.6px}
+h2{font-size:20px;font-weight:700;letter-spacing:-.3px}
+.mu{color:var(--mu)}.sm{font-size:13px}.xs{font-size:11.5px}
+.lime{color:var(--lime)}.red{color:var(--red)}.amb{color:var(--amb)}
+.card{background:var(--s1);border-radius:20px;border:1px solid #20242B}
+.row{display:flex;align-items:center}
+.btn{background:var(--lime);color:#0B0D10;font-weight:700;font-size:16px;border-radius:16px;height:54px;display:flex;align-items:center;justify-content:center;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:6px 10px;border-radius:99px;background:var(--s2)}
+.dot{width:8px;height:8px;border-radius:50%}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:4px 20px 12px}
+.back{width:38px;height:38px;border-radius:50%;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:20px}
+.tabbar{position:absolute;bottom:0;left:0;right:0;height:86px;background:rgba(14,16,20,.96);border-top:1px solid #1f232a;display:flex;justify-content:space-around;padding-top:12px;font-size:10.5px;color:var(--mu);font-weight:600}
+.tabbar div{display:flex;flex-direction:column;align-items:center;gap:4px}
+.tabbar .on{color:var(--lime)}
+</style></head><body>
+<div class="grid" id="grid"></div>
+<script>
+// ---------- skeleton geometry ----------
+const USER={head:[228,150],sh:[206,192],el:[178,222],wr:[196,190],hip:[140,318],kn:[236,330],an:[196,430],he:[180,440],to:[230,440]};
+const REF ={head:[194,142],sh:[178,186],el:[154,216],wr:[170,186],hip:[140,318],kn:[228,302],an:[192,404],he:[176,414],to:[226,414]};
+const BONES=[['sh','hip'],['hip','kn'],['kn','an'],['he','to'],['sh','el'],['el','wr']];
+const L=(a,b,c,w,extra='')=>`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${c}" stroke-width="${w}" stroke-linecap="round" ${extra}/>`;
+function body(j,fill='#3B424D'){ // silhouette of a lifter
+  return L(j.he,j.to,fill,16)+L(j.kn,j.an,fill,30)+L(j.hip,j.kn,fill,40)+L(j.sh,j.hip,fill,50)+
+    `<circle cx="${j.hip[0]}" cy="${j.hip[1]}" r="26" fill="${fill}"/>`+
+    L(j.sh,j.el,fill,20)+L(j.el,j.wr,fill,16)+`<circle cx="${j.head[0]}" cy="${j.head[1]}" r="23" fill="${fill}"/>`+
+    L([j.sh[0]-2,j.sh[1]-6],[j.sh[0]-2,j.sh[1]-6],'#59616D',8)+ // bar end
+    `<circle cx="${j.sh[0]-4}" cy="${j.sh[1]-8}" r="44" fill="none" stroke="#2A2F37" stroke-width="12"/>`+
+    `<circle cx="${j.sh[0]-4}" cy="${j.sh[1]-8}" r="7" fill="#59616D"/>`;
+}
+function skel(j,c,w=4,glow=true){
+  let s=glow?`<g filter="url(#glow)">`:'<g>';
+  BONES.forEach(([a,b])=>s+=L(j[a],j[b],c,w));
+  s+=L(j.sh,j.head,c,w);
+  ['sh','el','wr','hip','kn','an','to','he'].forEach(k=>s+=`<circle cx="${j[k][0]}" cy="${j[k][1]}" r="${w+1.5}" fill="#0B0D10" stroke="${c}" stroke-width="${w-1}"/>`);
+  s+=`<circle cx="${j.head[0]}" cy="${j.head[1]}" r="${w+4}" fill="none" stroke="${c}" stroke-width="${w-1}"/>`;
+  return s+'</g>';
+}
+const DEFS=`<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<linearGradient id="gym" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#20252C"/><stop offset=".78" stop-color="#15181D"/><stop offset=".78" stop-color="#0F1115"/><stop offset="1" stop-color="#0A0B0E"/></linearGradient>
+<radialGradient id="spot" cx=".55" cy=".35" r=".6"><stop offset="0" stop-color="#fff" stop-opacity=".07"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>`;
+function gym(w=360,h=480){ // backdrop: wall, rack posts, floor
+  return `<rect width="${w}" height="${h}" fill="url(#gym)"/><rect width="${w}" height="${h}" fill="url(#spot)"/>
+  <rect x="42" y="40" width="10" height="${h*.78-40}" fill="#262B33"/><rect x="300" y="40" width="10" height="${h*.78-40}" fill="#262B33"/>
+  <rect x="36" y="40" width="280" height="8" fill="#262B33"/>
+  ${[0,1,2,3,4,5,6,7].map(i=>`<rect x="47" y="${80+i*38}" width="3" height="6" fill="#343a44"/><rect x="305" y="${80+i*38}" width="3" height="6" fill="#343a44"/>`).join('')}
+  <line x1="0" y1="${h*.78}" x2="${w}" y2="${h*.78}" stroke="#2c323b" stroke-width="1"/>`;
+}
+function flag(p,label,dx,dy){
+  const [x,y]=p;return `<circle cx="${x}" cy="${y}" r="15" fill="rgba(255,90,95,.18)" stroke="#FF5A5F" stroke-width="2.5"/>
+  <line x1="${x}" y1="${y}" x2="${x+dx}" y2="${y+dy}" stroke="#FF5A5F" stroke-width="1.5"/>
+  <rect x="${x+dx-(dx<0?92:0)}" y="${y+dy-13}" width="92" height="26" rx="13" fill="#FF5A5F"/>
+  <text x="${x+dx-(dx<0?46:-46)}" y="${y+dy+4.5}" text-anchor="middle" font-size="12" font-weight="700" fill="#fff" font-family="Inter">${label}</text>`;
+}
+// ---------- icons ----------
+const I={
+ squat:`<svg viewBox="0 0 40 40" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="11" x2="36" y2="11"/><rect x="5" y="6" width="4" height="10" rx="1"/><rect x="31" y="6" width="4" height="10" rx="1"/><circle cx="21" cy="6" r="2.5"/><path d="M20 11 L15 22 L25 25 L21 35 M15 22 L12 35"/></svg>`,
+ bench:`<svg viewBox="0 0 40 40" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="28" x2="36" y2="28"/><line x1="10" y1="28" x2="10" y2="35"/><line x1="30" y1="28" x2="30" y2="35"/><circle cx="31" cy="23" r="2.5"/><path d="M28 24 L12 24 L8 30"/><line x1="20" y1="24" x2="20" y2="12"/><line x1="8" y1="12" x2="32" y2="12"/><rect x="5" y="8" width="4" height="8" rx="1"/><rect x="31" y="8" width="4" height="8" rx="1"/></svg>`,
+ dead:`<svg viewBox="0 0 40 40" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="6" r="2.5"/><path d="M22 10 L14 20 L20 26 L18 35 M14 20 L22 28 L26 35 M20 14 L22 30"/><line x1="4" y1="31" x2="36" y2="31"/><circle cx="7" cy="31" r="5"/><circle cx="33" cy="31" r="5"/></svg>`,
+ lat:`<svg viewBox="0 0 40 40" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="2" x2="20" y2="7"/><line x1="7" y1="7" x2="33" y2="7"/><path d="M9 7 L13 16 L20 18 L27 16 L31 7"/><circle cx="20" cy="13" r="2.5" /><path d="M20 18 L20 27 L28 28 L28 36"/><line x1="10" y1="28" x2="30" y2="28"/></svg>`,
+ check:`<svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 7.5 L6 10.5 L11.5 4" stroke="#0B0D10" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+ play:`<svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 2 L14 8 L4 14Z" fill="#fff"/></svg>`,
+};
+const statusBar=`<div class="island"></div><div class="sb"><span>9:41</span><i>●●●● ▲ ▮</i></div><div class="home-ind"></div>`;
+const tabbar=(on)=>`<div class="tabbar">${['Train','History','Form Map','Profile'].map((t,i)=>`<div class="${i==on?'on':''}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${['<path d="M4 12h3v-4h2v8h2V6h2v12h2v-8h2v4h3"/>','<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>','<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>','<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>'][i]}</svg>${t}</div>`).join('')}</div>`;
+
+// ---------- screens ----------
+const S=[];
+// 1 HOME
+S.push(['Choose exercise','Pick the lift you want to check',`${statusBar}
+<div class="pad" style="padding-top:8px">
+ <div class="row" style="justify-content:space-between"><div class="row" style="gap:8px"><div style="width:30px;height:30px;border-radius:9px;background:var(--lime);display:flex;align-items:center;justify-content:center;color:#0B0D10;font-weight:900;font-size:15px">T</div><b style="font-size:17px;letter-spacing:-.3px">TaskMaster</b></div><div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#5AC8FA,#C8F53C)"></div></div>
+ <p class="mu sm" style="margin-top:22px">Good morning, Saadan</p>
+ <h1 style="margin-top:4px">What are we<br>lifting today?</h1>
+ <div class="card row" style="margin-top:18px;padding:14px 16px;gap:12px;background:linear-gradient(120deg,#1d2a0c,#14171C 70%);border-color:#2e3d14">
+  <div style="font-size:26px;font-weight:800" class="lime">72</div><div style="flex:1"><b style="font-size:14px">Last squat form score</b><div class="mu xs" style="margin-top:2px">+8 vs last week · depth improving</div></div><span class="lime" style="font-size:20px">›</span></div>
+ <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+ ${[['Squat','squat','4 references','#C8F53C',true],['Bench Press','bench','3 references','#5AC8FA'],['Deadlift','dead','3 references','#FFB547'],['Lat Pulldown','lat','2 references','#B18CFF']].map(([n,ic,r,c,sel])=>`
+  <div class="card" style="padding:16px;height:124px;display:flex;flex-direction:column;justify-content:space-between;${sel?'border:1.5px solid var(--lime);background:#171c10':''}">
+   <div style="color:${c};width:46px;height:46px;border-radius:13px;background:${c}1f;display:flex;align-items:center;justify-content:center">${I[ic]}</div>
+   <div><b style="font-size:16px">${n}</b><div class="mu xs" style="margin-top:3px">${r} · side-on</div></div></div>`).join('')}
+ </div>
+ <div class="row" style="justify-content:space-between;margin-top:18px"><h2 style="font-size:17px">Recent sessions</h2><span class="mu sm">See all</span></div>
+ ${[['Squat vs Coach Maya R.','Today · 5 reps','72','#C8F53C'],['Deadlift vs Jordan K.','Tue · 3 reps','64','#FFB547']].map(([a,b,s,c])=>`<div class="row" style="gap:12px;margin-top:12px"><div style="width:48px;height:48px;border-radius:12px;background:var(--s2);overflow:hidden"><svg viewBox="100 110 170 340" width="48" height="48">${skel(USER,'#5AC8FA',8,false)}</svg></div><div style="flex:1"><b style="font-size:14px">${a}</b><div class="mu xs">${b}</div></div><b style="color:${c};font-size:17px">${s}</b></div>`).join('')}
+</div>${tabbar(0)}`]);
+
+// 2 REFERENCE PICKER
+const refs=[['Coach Maya R.','Powerlifting coach · high-bar','5 reps · 2.1s tempo',true,'MR'],['Jordan K.','Olympic lifter · ATG','3 reps · 1.6s tempo',false,'JK'],['Sam (friend)','Shared from Sam · low-bar','4 reps · 2.4s tempo',false,'S'],['Your best set','12 Sep · score 81','5 reps · 2.2s tempo',false,'★']];
+S.push(['Choose reference','Compare against a pro, a friend, or your best set',`${statusBar}
+<div class="nav"><div class="back">‹</div><span class="chip"><span style="color:var(--lime)">●</span> Squat</span><div style="width:38px"></div></div>
+<div class="pad"><h1 style="font-size:26px">Who do you want<br>to move like?</h1>
+<div class="row" style="background:var(--s1);border-radius:12px;padding:4px;margin-top:16px;font-size:13px;font-weight:600">${['Pros','Friends','My best'].map((t,i)=>`<div style="flex:1;text-align:center;padding:8px;border-radius:9px;${i==0?'background:var(--s3)':'color:var(--mu)'}">${t}</div>`).join('')}</div>
+${refs.map(([n,d,m,sel,ini])=>`<div class="card row" style="margin-top:12px;padding:10px;gap:12px;${sel?'border:1.5px solid var(--lime)':''}">
+ <div style="width:78px;height:92px;border-radius:12px;overflow:hidden;position:relative;flex:none"><svg viewBox="60 100 250 360" width="78" height="92" preserveAspectRatio="xMidYMid slice">${DEFS}${gym()}${body(REF,'#343b45')}${skel(REF,sel?'#C8F53C':'#8A93A0',6,false)}</svg></div>
+ <div style="flex:1"><div class="row" style="gap:8px"><b style="font-size:15px">${n}</b></div><div class="mu xs" style="margin-top:3px">${d}</div><div class="xs" style="margin-top:8px;color:#C5CBD3">${m}</div></div>
+ <div style="width:24px;height:24px;border-radius:50%;flex:none;${sel?'background:var(--lime);display:flex;align-items:center;justify-content:center':'border:2px solid #3a404a'}">${sel?I.check:''}</div></div>`).join('')}
+<div class="btn" style="position:absolute;left:20px;right:20px;bottom:40px">Continue with Maya →</div></div>`]);
+
+// 3 RECORD
+const guide=`<g fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="2" stroke-dasharray="6 6">${L(REF.sh,REF.hip,'#fff',2,'stroke-dasharray="6 6"')}</g>`;
+S.push(['Record or upload','Framing guide keeps every clip side-on and consistent',`
+<svg viewBox="0 0 390 844" width="390" height="844" style="position:absolute;inset:0">${DEFS}${gym(390,844)}
+ <g transform="translate(20,190) scale(1.0)" opacity=".95">${body({...USER,sh:[190,188],head:[208,146],el:[164,218],wr:[182,186],kn:[244,318],an:[204,420],he:[188,430],to:[238,430]},'#3a414b')}</g>
+ <rect x="95" y="250" width="200" height="440" rx="100" fill="none" stroke="#C8F53C" stroke-opacity=".7" stroke-width="2.5" stroke-dasharray="10 8"/>
+ ${[130,260].map(x=>`<line x1="${x}" y1="0" x2="${x}" y2="844" stroke="#fff" stroke-opacity=".22"/>`).join('')}<line x1="195" y1="0" x2="195" y2="844" stroke="#fff" stroke-opacity=".32"/>
+ ${[281,562].map(y=>`<line x1="0" y1="${y}" x2="390" y2="${y}" stroke="#fff" stroke-opacity=".22"/>`).join('')}
+ <line x1="40" y1="${844*.78}" x2="350" y2="${844*.78}" stroke="#C8F53C" stroke-width="2" stroke-opacity=".8"/>
+</svg>
+${statusBar}
+<div class="nav" style="position:relative;z-index:5"><div class="back" style="background:rgba(0,0,0,.45)">‹</div><b style="font-size:17px">Squat</b><div class="chip" style="background:rgba(0,0,0,.5)"><span style="color:#FF5A5F">●</span> 00:12</div></div>
+<div style="position:absolute;top:112px;left:0;right:0;text-align:center;z-index:5"><span style="background:rgba(0,0,0,.6);padding:8px 14px;border-radius:10px;font-size:12.5px">Side-on · fixed distance · full body + bar in frame</span></div>
+<div style="position:absolute;top:152px;left:0;right:0;display:flex;justify-content:center;gap:8px;z-index:5">
+ <span class="chip" style="background:rgba(200,245,60,.16);color:var(--lime)">✓ Side-on</span><span class="chip" style="background:rgba(200,245,60,.16);color:var(--lime)">✓ Full body</span><span class="chip" style="background:rgba(255,181,71,.16);color:var(--amb)">Rep 3 detected</span></div>
+<div style="position:absolute;bottom:0;left:0;right:0;height:190px;background:linear-gradient(transparent,rgba(0,0,0,.8));"></div>
+<div class="row" style="position:absolute;bottom:52px;left:28px;right:28px;justify-content:space-between;z-index:5">
+ <div style="text-align:center"><div style="width:52px;height:52px;border-radius:12px;background:var(--s3);border:2px solid #fff;overflow:hidden"><svg viewBox="100 110 170 340" width="48" height="48">${skel(REF,'#8A93A0',8,false)}</svg></div><div class="xs" style="margin-top:6px">Upload</div></div>
+ <div style="width:84px;height:84px;border-radius:50%;border:5px solid #fff;display:flex;align-items:center;justify-content:center"><div style="width:32px;height:32px;border-radius:8px;background:#FF3B30"></div></div>
+ <div style="text-align:center"><div style="width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">0.5×</div><div class="xs" style="margin-top:6px">Zoom</div></div>
+</div>`]);
+
+// 4 PROCESSING
+const steps=[['Uploading clip','14.2 MB',2],['Extracting pose','33 landmarks · 214 frames',2],['Detecting reps','5 reps found',2],['Syncing to Maya','DTW · rep 4 of 5',1],['Scoring & rendering','',0]];
+S.push(['Processing','Pose → reps → sync → score, with live status',`${statusBar}
+<div class="nav"><div class="back">✕</div><b style="font-size:15px">Analysing your squat</b><div style="width:38px"></div></div>
+<div style="margin:6px 20px 0;height:330px;border-radius:24px;overflow:hidden;position:relative">
+ <svg viewBox="0 100 360 340" width="350" height="330" preserveAspectRatio="xMidYMid slice">${DEFS}${gym()}${body(USER,'#2d333c')}${skel(USER,'#5AC8FA',3.5)}
+ <rect x="0" y="286" width="360" height="3" fill="#C8F53C" opacity=".9"/><rect x="0" y="236" width="360" height="50" fill="url(#scan)"/>
+ <defs><linearGradient id="scan" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C8F53C" stop-opacity="0"/><stop offset="1" stop-color="#C8F53C" stop-opacity=".22"/></linearGradient></defs></svg>
+ <span class="chip" style="position:absolute;top:12px;left:12px;background:rgba(0,0,0,.55)">frame 142 / 214</span></div>
+<div class="pad" style="margin-top:22px">
+ <div class="row" style="justify-content:space-between;align-items:flex-end"><div><div class="mu xs">Overall</div><div style="font-size:34px;font-weight:800;letter-spacing:-1px">68%</div></div><span class="mu sm">~12 s left</span></div>
+ <div style="height:8px;background:var(--s2);border-radius:4px;margin-top:8px"><div style="width:68%;height:100%;background:var(--lime);border-radius:4px"></div></div>
+ <div style="margin-top:18px">${steps.map(([t,d,st])=>`<div class="row" style="gap:14px;padding:10px 0">
+  <div style="width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;${st==2?'background:var(--lime)':st==1?'border:3px solid var(--lime);border-right-color:transparent':'border:2px solid #333a44'}">${st==2?I.check:''}</div>
+  <div style="flex:1"><b style="font-size:14.5px;${st==0?'color:var(--mu)':''}">${t}</b>${d?`<div class="mu xs" style="margin-top:2px">${d}</div>`:''}</div></div>`).join('')}</div>
+</div>`]);
+
+// 5 RESULTS
+const flags=[['0:04','Hip','Squat is 9° shallow — sit hips below knee','#FF5A5F'],['0:04','Torso','Leaning 14° further forward than Maya','#FF5A5F'],['0:09','Knee','Knee drift OK · within 5°','#FFB547']];
+S.push(['Results overlay','Reference skeleton anchored to your hips, synced rep by rep',`${statusBar}
+<div class="nav"><div class="back">‹</div><div style="text-align:center"><b style="font-size:15px">Squat · Rep 3</b><div class="mu xs">vs Coach Maya R.</div></div><div class="back" style="font-size:16px">⤴</div></div>
+<div style="position:relative;height:380px">
+ <svg viewBox="0 95 360 350" width="390" height="380" preserveAspectRatio="xMidYMid slice">${DEFS}${gym()}${body(USER)}${skel(USER,'#5AC8FA',3,false)}${skel(REF,'#C8F53C',4.5)}
+ ${flag(USER.hip,'Depth −9°',-30,70)}${flag([173,255],'Torso +14°',-50,-40)}</svg>
+ <div class="row" style="position:absolute;left:12px;top:12px;gap:6px"><span class="chip" style="background:rgba(0,0,0,.6)"><span class="dot" style="background:var(--lime)"></span>Maya</span><span class="chip" style="background:rgba(0,0,0,.6)"><span class="dot" style="background:var(--cy)"></span>You</span></div>
+ <span class="chip" style="position:absolute;right:12px;top:12px;background:rgba(0,0,0,.6)">Ghost 40%</span>
+</div>
+<div class="pad" style="margin-top:12px">
+ <div class="row" style="gap:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--s2);display:flex;align-items:center;justify-content:center">${I.play}</div>
+  <div style="flex:1;position:relative;height:34px">
+   <div style="position:absolute;top:15px;left:0;right:0;height:4px;background:var(--s3);border-radius:2px"></div><div style="position:absolute;top:15px;left:0;width:46%;height:4px;background:#fff;border-radius:2px"></div>
+   ${[8,27,46,65,84].map((x,i)=>`<div style="position:absolute;left:${x}%;top:0;font-size:9.5px;color:var(--mu);transform:translateX(-50%)">R${i+1}</div><div style="position:absolute;left:${x}%;top:12px;width:10px;height:10px;border-radius:50%;transform:translateX(-50%);background:${[1,2].includes(i)?'#FF5A5F':i==3?'#FFB547':'#C8F53C'};border:2px solid var(--bg)"></div>`).join('')}
+  </div><span class="mu xs">0:04</span></div>
+ <div class="card row" style="margin-top:14px;padding:14px;gap:14px">
+  <svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="27" fill="none" stroke="#262B33" stroke-width="7"/><circle cx="32" cy="32" r="27" fill="none" stroke="#C8F53C" stroke-width="7" stroke-linecap="round" stroke-dasharray="${2*Math.PI*27*.72} 999" transform="rotate(-90 32 32)"/><text x="32" y="38" text-anchor="middle" font-size="19" font-weight="800" fill="#F2F4F7" font-family="Inter">72</text></svg>
+  <div style="flex:1"><b style="font-size:15px">Form score</b><div class="mu xs" style="margin-top:3px">2 issues on reps 2–3 · tempo matched</div></div><span class="mu">›</span></div>
+ ${flags.map(([t,j,m,c])=>`<div class="row" style="gap:12px;margin-top:12px"><span style="font-size:11px;font-weight:700;padding:5px 8px;border-radius:8px;background:${c}22;color:${c}">${t}</span><div style="flex:1"><b style="font-size:13.5px">${j}</b><div class="mu xs" style="margin-top:1px">${m}</div></div></div>`).join('')}
+</div>`]);
+
+// 6 FORM MAP
+const heat={head:'#C8F53C',sh:'#FFB547',el:'#C8F53C',wr:'#C8F53C',hip:'#FF5A5F',kn:'#FFB547',an:'#C8F53C',to:'#C8F53C',he:'#C8F53C'};
+const joints=[['Hip depth',9,'#FF5A5F','reps 2, 3'],['Torso angle',14,'#FF5A5F','reps 2, 3, 4'],['Knee travel',5,'#FFB547','rep 4'],['Ankle',2,'#C8F53C','—']];
+S.push(['Form Map','Where on your body the form breaks down, across every rep',`${statusBar}
+<div class="nav"><div class="back">‹</div><b style="font-size:15px">Form Map</b><span class="chip">5 reps</span></div>
+<div class="pad"><div class="card" style="height:300px;position:relative;overflow:hidden">
+ <svg viewBox="70 110 230 350" width="348" height="300">${DEFS}
+  ${body(USER,'#1E232A')}
+  ${Object.entries(heat).map(([k,c])=>`<circle cx="${USER[k][0]}" cy="${USER[k][1]}" r="${c=='#FF5A5F'?34:c=='#FFB547'?24:0}" fill="${c}" opacity=".25" filter="url(#glow)"/>`).join('')}
+  ${skel(USER,'#5B6470',3,false)}
+  ${Object.entries(heat).map(([k,c])=>`<circle cx="${USER[k][0]}" cy="${USER[k][1]}" r="7" fill="${c}" stroke="#0B0D10" stroke-width="2"/>`).join('')}
+  <line x1="${(USER.sh[0]+USER.hip[0])/2}" y1="${(USER.sh[1]+USER.hip[1])/2}" x2="${(USER.sh[0]+USER.hip[0])/2}" y2="${(USER.sh[1]+USER.hip[1])/2}" stroke="#FF5A5F" stroke-width="12" stroke-linecap="round"/>
+ </svg>
+ <div style="position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:5px" class="xs">
+  <span class="row" style="gap:6px"><span class="dot" style="background:#FF5A5F"></span>Needs work</span><span class="row" style="gap:6px"><span class="dot" style="background:#FFB547"></span>Watch</span><span class="row" style="gap:6px"><span class="dot" style="background:#C8F53C"></span>Matches pro</span></div></div>
+ <h2 style="font-size:16px;margin-top:18px">Max deviation vs Maya</h2>
+ ${joints.map(([n,d,c,r])=>`<div style="margin-top:12px"><div class="row" style="justify-content:space-between;font-size:13px"><b>${n}</b><span><b style="color:${c}">${d}°</b> <span class="mu xs">· ${r}</span></span></div><div style="height:6px;background:var(--s2);border-radius:3px;margin-top:6px"><div style="width:${d/16*100}%;height:100%;border-radius:3px;background:${c}"></div></div></div>`).join('')}
+ <h2 style="font-size:16px;margin-top:20px">Score by rep</h2>
+ <div class="row" style="gap:10px;margin-top:10px;align-items:flex-end;height:74px">${[84,66,61,70,79].map((v,i)=>`<div style="flex:1;text-align:center"><div class="xs" style="font-weight:700;margin-bottom:4px">${v}</div><div style="height:${(v-45)*1.3}px;border-radius:6px;background:${v<65?'#FF5A5F':v<75?'#FFB547':'#C8F53C'}"></div></div>`).join('')}</div>
+</div>`]);
+
+document.getElementById('grid').innerHTML=S.map(([t,d,h],i)=>`<div><div class="phone" id="p${i+1}"><div class="scr">${h}</div></div><div class="cap"><b>${i+1}. ${t}</b><span>${d}</span></div></div>`).join('');
+</script></body></html>

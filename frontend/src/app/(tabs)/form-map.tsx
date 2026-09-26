@@ -12,25 +12,36 @@ import Skeleton from '../../components/anatomy/Skeleton';
 import { FormMapIcon } from '../../components/icons/TabIcons';
 import { USER_JOINTS } from '../../components/anatomy/joints';
 import { useAnalysis } from '../../state/AnalysisContext';
-import { Severity } from '../../models/analysis';
+import { formatJointName, jointNameToKey } from '../../utils/jointNames';
 import { colors } from '../../theme/colors';
 import { font } from '../../theme/typography';
 
-const SEVERITY_COLOR: Record<Severity, string> = { red: colors.red, amber: colors.amber, lime: colors.lime };
-const SEVERITY_RADIUS: Record<Severity, number> = { red: 34, amber: 24, lime: 0 };
+function severityColor(degrees: number): string {
+  if (degrees >= 10) return colors.red;
+  if (degrees >= 5) return colors.amber;
+  return colors.lime;
+}
+
+function severityRadius(degrees: number): number {
+  if (degrees >= 10) return 34;
+  if (degrees >= 5) return 24;
+  return 0;
+}
 
 export default function FormMapScreen() {
   const router = useRouter();
-  const { lastAnalysis } = useAnalysis();
+  const { lastJob } = useAnalysis();
+
+  const perJoint = lastJob ? Object.entries(lastJob.result.form_report.per_joint) : [];
 
   return (
     <Screen edges={['top']}>
       <ScreenHeader
         title="Form Map"
-        right={lastAnalysis ? <Chip>{lastAnalysis.repCount} reps</Chip> : <View style={{ width: 38 }} />}
+        right={lastJob ? <Chip>{Math.round(lastJob.result.form_report.score)}</Chip> : <View style={{ width: 38 }} />}
       />
 
-      {!lastAnalysis ? (
+      {!lastJob ? (
         <View style={styles.empty}>
           <FormMapIcon size={40} color={colors.mutedDim} />
           <Text style={styles.emptyTitle}>No analysis yet</Text>
@@ -39,26 +50,26 @@ export default function FormMapScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.pad} showsVerticalScrollIndicator={false}>
-          <Text style={styles.subtitle}>{lastAnalysis.exercise} vs {lastAnalysis.reference.name}</Text>
+          <Text style={styles.subtitle}>{lastJob.exerciseName} vs {lastJob.referenceName}</Text>
           <Card style={styles.heatCard}>
             <Svg viewBox="70 110 230 350" width="100%" height={280}>
               <LifterSilhouette joints={USER_JOINTS} fill="#1E232A" />
-              {lastAnalysis.deviations.map((d) => {
-                const r = SEVERITY_RADIUS[d.severity];
+              {perJoint.map(([name, dev]) => {
+                const r = severityRadius(dev.max_diff_deg);
                 if (!r) return null;
-                const [x, y] = USER_JOINTS[d.jointKey];
-                return <Circle key={`glow-${d.jointKey}`} cx={x} cy={y} r={r} fill={SEVERITY_COLOR[d.severity]} opacity={0.25} />;
+                const [x, y] = USER_JOINTS[jointNameToKey(name)];
+                return <Circle key={`glow-${name}`} cx={x} cy={y} r={r} fill={severityColor(dev.max_diff_deg)} opacity={0.25} />;
               })}
               <Skeleton joints={USER_JOINTS} color={colors.mutedDim} strokeWidth={3} glow={false} />
-              {lastAnalysis.deviations.map((d) => {
-                const [x, y] = USER_JOINTS[d.jointKey];
+              {perJoint.map(([name, dev]) => {
+                const [x, y] = USER_JOINTS[jointNameToKey(name)];
                 return (
                   <Circle
-                    key={`dot-${d.jointKey}`}
+                    key={`dot-${name}`}
                     cx={x}
                     cy={y}
                     r={7}
-                    fill={SEVERITY_COLOR[d.severity]}
+                    fill={severityColor(dev.max_diff_deg)}
                     stroke={colors.bg}
                     strokeWidth={2}
                   />
@@ -72,35 +83,27 @@ export default function FormMapScreen() {
             </View>
           </Card>
 
-          <Text style={styles.sectionTitle}>Max deviation vs {lastAnalysis.reference.name.split(' ')[0]}</Text>
-          {lastAnalysis.deviations.map((d) => (
-            <View key={d.name} style={styles.devRow}>
-              <View style={styles.devLabelRow}>
-                <Text style={styles.devName}>{d.name}</Text>
-                <Text style={styles.devValue}>
-                  <Text style={{ color: SEVERITY_COLOR[d.severity], fontFamily: font.bold }}>{d.degrees}°</Text>
-                  <Text style={styles.devReps}> · {d.reps}</Text>
-                </Text>
-              </View>
-              <View style={styles.devTrack}>
-                <View style={[styles.devFill, { width: `${Math.min(100, (d.degrees / 16) * 100)}%`, backgroundColor: SEVERITY_COLOR[d.severity] }]} />
-              </View>
-            </View>
-          ))}
-
-          <Text style={styles.sectionTitle}>Score by rep</Text>
-          <View style={styles.barsRow}>
-            {lastAnalysis.scoreByRep.map((v, i) => {
-              const color = v < 65 ? colors.red : v < 75 ? colors.amber : colors.lime;
-              return (
-                <View key={i} style={styles.barCol}>
-                  <Text style={styles.barValue}>{v}</Text>
-                  <View style={[styles.bar, { height: Math.max(8, (v - 35) * 1.1), backgroundColor: color }]} />
-                  <Text style={styles.barRepLabel}>R{i + 1}</Text>
+          <Text style={styles.sectionTitle}>Max deviation vs {lastJob.referenceName.split(' ')[0]}</Text>
+          {perJoint.length === 0 ? (
+            <Text style={styles.emptyText}>No per-joint data returned for this job.</Text>
+          ) : (
+            perJoint
+              .sort((a, b) => b[1].max_diff_deg - a[1].max_diff_deg)
+              .map(([name, dev]) => (
+                <View key={name} style={styles.devRow}>
+                  <View style={styles.devLabelRow}>
+                    <Text style={styles.devName}>{formatJointName(name)}</Text>
+                    <Text style={styles.devValue}>
+                      <Text style={{ color: severityColor(dev.max_diff_deg), fontFamily: font.bold }}>{dev.max_diff_deg}°</Text>
+                      <Text style={styles.devReps}> · {dev.frames_flagged.length} frame{dev.frames_flagged.length === 1 ? '' : 's'} flagged</Text>
+                    </Text>
+                  </View>
+                  <View style={styles.devTrack}>
+                    <View style={[styles.devFill, { width: `${Math.min(100, (dev.max_diff_deg / 16) * 100)}%`, backgroundColor: severityColor(dev.max_diff_deg) }]} />
+                  </View>
                 </View>
-              );
-            })}
-          </View>
+              ))
+          )}
         </ScrollView>
       )}
     </Screen>
@@ -119,6 +122,7 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { color: colors.text, fontSize: 11.5, fontFamily: font.medium },
   sectionTitle: { color: colors.text, fontSize: 16, fontFamily: font.bold, marginTop: 20, marginBottom: 4 },
+  emptyText: { color: colors.muted, fontSize: 12.5, fontFamily: font.regular, marginTop: 8 },
   devRow: { marginTop: 12 },
   devLabelRow: { flexDirection: 'row', justifyContent: 'space-between' },
   devName: { color: colors.text, fontSize: 13, fontFamily: font.bold },
@@ -126,9 +130,4 @@ const styles = StyleSheet.create({
   devReps: { color: colors.muted, fontFamily: font.medium },
   devTrack: { height: 6, backgroundColor: colors.s2, borderRadius: 3, marginTop: 6 },
   devFill: { height: '100%', borderRadius: 3 },
-  barsRow: { flexDirection: 'row', gap: 10, marginTop: 10, alignItems: 'flex-end', height: 90 },
-  barCol: { flex: 1, alignItems: 'center' },
-  barValue: { color: colors.text, fontSize: 11.5, fontFamily: font.bold, marginBottom: 4 },
-  bar: { width: '100%', borderRadius: 6 },
-  barRepLabel: { color: colors.muted, fontSize: 10, fontFamily: font.medium, marginTop: 6 },
 });

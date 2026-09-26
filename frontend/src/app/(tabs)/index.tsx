@@ -1,20 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
-import {
-  FlatList,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg from 'react-native-svg';
 import Screen from '../../components/ui/Screen';
 import Card from '../../components/ui/Card';
-import { EXERCISES, Exercise } from '../../models/exercise';
-import { EXERCISE_ACCENTS, EXERCISE_ICONS } from '../../components/icons/ExerciseIcons';
-import { referenceCountFor } from '../../models/reference';
+import { getExerciseAccent, getExerciseIcon } from '../../components/icons/ExerciseIcons';
+import { useCatalogue } from '../../services/catalogue';
 import { ExerciseClip, loadClips } from '../../services/clipLibrary';
 import { useAnalysis } from '../../state/AnalysisContext';
 import { colors } from '../../theme/colors';
@@ -33,6 +25,7 @@ function greeting(): string {
 export default function TrainScreen() {
   const router = useRouter();
   const { history } = useAnalysis();
+  const { exercises, loading, error, reload } = useCatalogue();
   const [clips, setClips] = useState<ExerciseClip[]>([]);
 
   useFocusEffect(
@@ -42,7 +35,7 @@ export default function TrainScreen() {
   );
 
   const clipCounts = useMemo(() => {
-    const counts: Partial<Record<Exercise, number>> = {};
+    const counts: Record<string, number> = {};
     clips.forEach((c) => {
       counts[c.exercise] = (counts[c.exercise] ?? 0) + 1;
     });
@@ -73,17 +66,17 @@ export default function TrainScreen() {
         <Text style={styles.heading}>{'What are we\nlifting today?'}</Text>
 
         {latest ? (
-          <Pressable onPress={() => router.push(`/results/${encodeURIComponent(latest.exercise)}?referenceId=${latest.reference.id}&clipId=${encodeURIComponent(latest.id)}`)}>
+          <Pressable onPress={() => router.push(`/results/${latest.jobId}`)}>
             <LinearGradient
               colors={['#1d2a0c', colors.s1]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.scoreCard}
             >
-              <Text style={styles.scoreValue}>{latest.overallScore}</Text>
+              <Text style={styles.scoreValue}>{Math.round(latest.result.form_report.score)}</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.scoreTitle}>Last {latest.exercise.toLowerCase()} form score</Text>
-                <Text style={styles.scoreSubtitle}>vs {latest.reference.name} · {latest.repCount} reps</Text>
+                <Text style={styles.scoreTitle}>Last {latest.exerciseName.toLowerCase()} form score</Text>
+                <Text style={styles.scoreSubtitle}>vs {latest.referenceName}</Text>
               </View>
               <ChevronRight color={colors.lime} />
             </LinearGradient>
@@ -95,30 +88,45 @@ export default function TrainScreen() {
           </Card>
         )}
 
-        <View style={styles.grid}>
-          {EXERCISES.map((exercise) => {
-            const Icon = EXERCISE_ICONS[exercise];
-            const accent = EXERCISE_ACCENTS[exercise];
-            const selected = latest?.exercise === exercise;
-            return (
-              <Pressable
-                key={exercise}
-                style={[styles.exerciseCard, selected && styles.exerciseCardSelected]}
-                onPress={() => router.push(`/reference/${encodeURIComponent(exercise)}`)}
-              >
-                <View style={[styles.exerciseIconWrap, { backgroundColor: `${accent}1f` }]}>
-                  <Icon color={accent} size={24} />
-                </View>
-                <View>
-                  <Text style={styles.exerciseName}>{exercise}</Text>
-                  <Text style={styles.exerciseMeta}>
-                    {referenceCountFor(exercise)} references · side-on
-                  </Text>
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
+        {loading ? (
+          <ActivityIndicator color={colors.lime} style={{ marginTop: 24 }} />
+        ) : error ? (
+          <Card style={styles.errorCard}>
+            <Text style={styles.errorTitle}>Can’t reach TaskMaster server</Text>
+            <Text style={styles.errorBody}>{error}</Text>
+            <Pressable onPress={reload}>
+              <Text style={styles.retryText}>Tap to retry</Text>
+            </Pressable>
+          </Card>
+        ) : exercises.length === 0 ? (
+          <Text style={styles.emptyText}>No exercises configured on the server yet.</Text>
+        ) : (
+          <View style={styles.grid}>
+            {exercises.map((exercise) => {
+              const Icon = getExerciseIcon(exercise.id);
+              const accent = getExerciseAccent(exercise.id);
+              const selected = latest?.exerciseId === exercise.id;
+              const clipCount = clipCounts[exercise.id] ?? 0;
+              return (
+                <Pressable
+                  key={exercise.id}
+                  style={[styles.exerciseCard, selected && styles.exerciseCardSelected]}
+                  onPress={() => router.push(`/reference/${exercise.id}?name=${encodeURIComponent(exercise.name)}`)}
+                >
+                  <View style={[styles.exerciseIconWrap, { backgroundColor: `${accent}1f` }]}>
+                    <Icon color={accent} size={24} />
+                  </View>
+                  <View>
+                    <Text style={styles.exerciseName}>{exercise.name}</Text>
+                    <Text style={styles.exerciseMeta}>
+                      {clipCount} clip{clipCount === 1 ? '' : 's'} recorded · side-on
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
 
         <View style={styles.sectionRow}>
           <Text style={styles.sectionTitle}>Recent sessions</Text>
@@ -134,38 +142,29 @@ export default function TrainScreen() {
         ) : (
           <FlatList
             data={history.slice(0, 4)}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item) => item.jobId}
             scrollEnabled={false}
             renderItem={({ item }) => {
-              const scoreColor = item.overallScore >= 75 ? colors.lime : item.overallScore >= 60 ? colors.amber : colors.red;
+              const score = Math.round(item.result.form_report.score);
+              const scoreColor = score >= 75 ? colors.lime : score >= 60 ? colors.amber : colors.red;
               return (
-                <Pressable
-                  style={styles.sessionRow}
-                  onPress={() => router.push(`/results/${encodeURIComponent(item.exercise)}?referenceId=${item.reference.id}&clipId=${encodeURIComponent(item.id)}`)}
-                >
+                <Pressable style={styles.sessionRow} onPress={() => router.push(`/results/${item.jobId}`)}>
                   <View style={styles.sessionThumb}>
                     <Svg viewBox="100 110 170 340" width={48} height={48}>
                       <Skeleton joints={USER_JOINTS} color={colors.cyan} strokeWidth={8} glow={false} />
                     </Svg>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.sessionTitle}>{item.exercise} vs {item.reference.name}</Text>
+                    <Text style={styles.sessionTitle}>{item.exerciseName} vs {item.referenceName}</Text>
                     <Text style={styles.sessionSubtitle}>
-                      {new Date(item.createdAt).toLocaleDateString(undefined, { weekday: 'short' })} · {item.repCount} reps
+                      {new Date(item.createdAt).toLocaleDateString(undefined, { weekday: 'short' })}
                     </Text>
                   </View>
-                  <Text style={[styles.sessionScore, { color: scoreColor }]}>{item.overallScore}</Text>
+                  <Text style={[styles.sessionScore, { color: scoreColor }]}>{score}</Text>
                 </Pressable>
               );
             }}
           />
-        )}
-
-        {clips.length > 0 && (
-          <Text style={styles.clipFootnote}>
-            {clips.length} clip{clips.length === 1 ? '' : 's'} saved on this device
-            {clipCounts && ` across ${Object.keys(clipCounts).length} exercise${Object.keys(clipCounts).length === 1 ? '' : 's'}`}
-          </Text>
         )}
       </ScrollView>
     </Screen>
@@ -205,6 +204,10 @@ const styles = StyleSheet.create({
   welcomeCard: { marginTop: 18, padding: 16 },
   welcomeTitle: { color: colors.text, fontSize: 15, fontFamily: font.bold },
   welcomeBody: { color: colors.muted, fontSize: 12.5, fontFamily: font.regular, marginTop: 6, lineHeight: 18 },
+  errorCard: { marginTop: 18, padding: 16 },
+  errorTitle: { color: colors.red, fontSize: 14, fontFamily: font.bold },
+  errorBody: { color: colors.muted, fontSize: 12, fontFamily: font.regular, marginTop: 6, lineHeight: 17 },
+  retryText: { color: colors.lime, fontSize: 12.5, fontFamily: font.semibold, marginTop: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 16 },
   exerciseCard: {
     width: '47.5%',
@@ -229,5 +232,4 @@ const styles = StyleSheet.create({
   sessionTitle: { color: colors.text, fontSize: 14, fontFamily: font.bold },
   sessionSubtitle: { color: colors.muted, fontSize: 11, fontFamily: font.medium, marginTop: 1 },
   sessionScore: { fontSize: 17, fontFamily: font.extrabold },
-  clipFootnote: { color: colors.mutedDim, fontSize: 11, fontFamily: font.regular, marginTop: 20, textAlign: 'center' },
 });

@@ -5,9 +5,12 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import Screen from '../../components/ui/Screen';
 import ScreenHeader from '../../components/ui/ScreenHeader';
 import Card from '../../components/ui/Card';
+import Chip from '../../components/ui/Chip';
 import ScoreRing from '../../components/ui/ScoreRing';
 import { PlayIcon, ShareIcon } from '../../components/icons/MiscIcons';
-import { ApiJobResult, getJobResult, mediaUrl } from '../../services/apiGateway';
+import Smpl3DOverlay from '../../components/three/Smpl3DOverlay';
+import { ApiJobResult, getJobResult, getJobStatus, getReferences, mediaUrl } from '../../services/apiGateway';
+import { useCatalogue, findExerciseName } from '../../services/catalogue';
 import { useAnalysis } from '../../state/AnalysisContext';
 import { formatJointName } from '../../utils/jointNames';
 import { colors, radii } from '../../theme/colors';
@@ -17,10 +20,12 @@ export default function ResultsRoute() {
   const { jobId } = useLocalSearchParams<{ jobId: string }>();
   const router = useRouter();
   const { getJob } = useAnalysis();
+  const { exercises } = useCatalogue();
 
   const cached = getJob(jobId);
   const [result, setResult] = useState<ApiJobResult | null>(cached?.result ?? null);
   const [error, setError] = useState<string | null>(null);
+  const [fallbackReferenceName, setFallbackReferenceName] = useState<string | null>(null);
 
   useEffect(() => {
     if (result) return;
@@ -29,14 +34,36 @@ export default function ResultsRoute() {
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load result'));
   }, [jobId, result]);
 
-  const exerciseName = cached?.exerciseName ?? result?.exercise ?? 'Exercise';
-  const referenceName = cached?.referenceName ?? 'reference';
+  // Only needed when this screen is opened cold (deep link, or history from a previous app session) —
+  // the normal navigation flow already carries the reference name along as a param.
+  useEffect(() => {
+    if (cached || !result) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await getJobStatus(jobId);
+        if (!status.reference_id) return;
+        const refs = await getReferences(result.exercise);
+        const match = refs.find((r) => r.id === status.reference_id);
+        if (!cancelled && match) setFallbackReferenceName(match.name);
+      } catch {
+        // best-effort only — falls back to the generic "reference" label
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cached, result, jobId]);
+
+  const exerciseName = cached?.exerciseName ?? findExerciseName(exercises, result?.exercise);
+  const referenceName = cached?.referenceName ?? fallbackReferenceName ?? 'reference';
   const videoUri = mediaUrl(result?.video_url);
 
   const player = useVideoPlayer(videoUri ?? null, (p) => {
     p.loop = true;
   });
   const [isPlaying, setIsPlaying] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
 
   const handleShare = () => {
     if (!result) return;
@@ -90,7 +117,16 @@ export default function ResultsRoute() {
         <View style={styles.videoWrap}>
           {videoUri ? (
             <>
-              <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" />
+              <VideoView
+                player={player}
+                style={[StyleSheet.absoluteFill, styles.video]}
+                contentFit="cover"
+              />
+              {showOverlay && (
+                <View style={styles.overlaySvgWrap} pointerEvents="none">
+                  <Smpl3DOverlay opacity={0.85} />
+                </View>
+              )}
               <Pressable
                 style={styles.playOverlay}
                 onPress={() => {
@@ -107,6 +143,11 @@ export default function ResultsRoute() {
                     <PlayIcon size={20} />
                   </View>
                 )}
+              </Pressable>
+              <Pressable style={styles.overlayToggle} onPress={() => setShowOverlay((v) => !v)}>
+                <Chip background="rgba(0,0,0,0.6)" dot={colors.lime}>
+                  {showOverlay ? '3D preview overlay · placeholder' : 'Overlay hidden'}
+                </Chip>
               </Pressable>
             </>
           ) : (
@@ -167,6 +208,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   videoWrap: { height: 320, marginHorizontal: 20, borderRadius: radii.xl, overflow: 'hidden', backgroundColor: colors.s1 },
+  video: { width: '100%', height: '100%' },
+  overlaySvgWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  overlayToggle: { position: 'absolute', left: 12, bottom: 12 },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   playBtnBig: {
     width: 56,

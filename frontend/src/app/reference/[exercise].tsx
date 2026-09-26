@@ -86,7 +86,9 @@ export default function ReferencePickerScreen() {
               <Text style={styles.emptyText}>
                 {all.length === 0
                   ? `No references exist for ${exerciseName} yet. Seed one on the backend with scripts/add_reference.py --seed.`
-                  : `No ${tab.toLowerCase()} references for ${exerciseName} yet.`}
+                  : tab === 'Pro'
+                    ? `No professional references for ${exerciseName} yet.`
+                    : `You haven't saved any of your own clips as a reference for ${exerciseName} yet.`}
               </Text>
             }
             renderItem={({ item }) => {
@@ -125,7 +127,7 @@ export default function ReferencePickerScreen() {
       {selected && (
         <View style={styles.footer}>
           <PrimaryButton
-            label={`Continue with ${selected.name.split(' ')[0]} →`}
+            label={`Continue with ${selected.name} →`}
             onPress={() =>
               router.push(
                 `/record/${exercise}?referenceId=${selected.id}&referenceName=${encodeURIComponent(selected.name)}&exerciseName=${encodeURIComponent(exerciseName)}`

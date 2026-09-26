@@ -1,132 +1,117 @@
 import React, { useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Sharing from 'expo-sharing';
+import Card from '../components/ui/Card';
+import ScreenHeader from '../components/ui/ScreenHeader';
+import { ShareIcon, CheckIcon } from '../components/icons/MiscIcons';
+import VideoPlayerModal from '../components/VideoPlayerModal';
 import { Exercise } from '../models/exercise';
 import { ExerciseClip, clipFileUri, deleteClip } from '../services/clipLibrary';
+import { colors } from '../theme/colors';
+import { font } from '../theme/typography';
 
 interface Props {
   exercise: Exercise;
   clips: ExerciseClip[];
   onBack: () => void;
   onDeleted: () => Promise<void> | void;
+  mode?: 'view' | 'pick';
+  onPick?: (clip: ExerciseClip) => void;
 }
 
-export default function ClipListScreen({ exercise, clips, onBack, onDeleted }: Props) {
-  const [playingClip, setPlayingClip] = useState<ExerciseClip | null>(null);
+export default function ClipListScreen({ exercise, clips, onBack, onDeleted, mode = 'view', onPick }: Props) {
+  const [playingUri, setPlayingUri] = useState<string | null>(null);
+  const isPicking = mode === 'pick';
 
   return (
     <View style={styles.container}>
-      <View style={styles.topBar}>
-        <Pressable onPress={onBack} hitSlop={12}>
-          <Text style={styles.backText}>{'‹ Back'}</Text>
-        </Pressable>
-        <Text style={styles.title}>{exercise} Clips</Text>
-        <View style={styles.topBarSpacer} />
-      </View>
+      <ScreenHeader onBack={onBack} title={`${exercise} clips`} subtitle={isPicking ? 'Tap a clip to use it' : undefined} />
 
       {clips.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>No clips yet. Record one from the camera screen.</Text>
+          <Text style={styles.emptyText}>
+            {isPicking
+              ? 'No saved clips for this lift yet — go back and record one instead.'
+              : 'No clips yet. Record one from the camera screen.'}
+          </Text>
         </View>
       ) : (
         <FlatList
           data={clips}
           keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
           renderItem={({ item }) => (
-            <Pressable style={styles.row} onPress={() => setPlayingClip(item)}>
-              <View>
-                <Text style={styles.rowTitle}>{new Date(item.dateRecorded).toLocaleString()}</Text>
-                <Text style={styles.rowSubtitle}>{item.durationSeconds.toFixed(1)}s</Text>
-              </View>
-              <View style={styles.rowActions}>
-                <Pressable
-                  onPress={async () => {
-                    const uri = clipFileUri(item);
-                    if (await Sharing.isAvailableAsync()) {
-                      await Sharing.shareAsync(uri);
-                    }
-                  }}
-                  hitSlop={12}
-                >
-                  <Text style={styles.shareText}>Share</Text>
-                </Pressable>
-                <Pressable
-                  onPress={async () => {
-                    await deleteClip(item);
-                    await onDeleted();
-                  }}
-                  hitSlop={12}
-                >
-                  <Text style={styles.deleteText}>Delete</Text>
-                </Pressable>
-              </View>
-            </Pressable>
+            <Card style={styles.row}>
+              <Pressable
+                style={styles.rowMain}
+                onPress={() => (isPicking ? onPick?.(item) : setPlayingUri(clipFileUri(item)))}
+              >
+                <View>
+                  <Text style={styles.rowTitle}>{new Date(item.dateRecorded).toLocaleString()}</Text>
+                  <Text style={styles.rowSubtitle}>{item.durationSeconds.toFixed(1)}s</Text>
+                </View>
+                {isPicking && (
+                  <View style={styles.pickBadge}>
+                    <CheckIcon />
+                  </View>
+                )}
+              </Pressable>
+              {!isPicking && (
+                <View style={styles.rowActions}>
+                  <Pressable
+                    onPress={async () => {
+                      const uri = clipFileUri(item);
+                      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
+                    }}
+                    hitSlop={10}
+                  >
+                    <ShareIcon size={16} color={colors.muted} />
+                  </Pressable>
+                  <Pressable
+                    onPress={async () => {
+                      await deleteClip(item);
+                      await onDeleted();
+                    }}
+                    hitSlop={10}
+                  >
+                    <Text style={styles.deleteText}>Delete</Text>
+                  </Pressable>
+                </View>
+              )}
+            </Card>
           )}
         />
       )}
 
-      <Modal visible={!!playingClip} animationType="slide" onRequestClose={() => setPlayingClip(null)}>
-        {playingClip && (
-          <ClipPlayer uri={clipFileUri(playingClip)} onClose={() => setPlayingClip(null)} />
-        )}
-      </Modal>
-    </View>
-  );
-}
-
-function ClipPlayer({ uri, onClose }: { uri: string; onClose: () => void }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.play();
-  });
-
-  return (
-    <View style={styles.playerContainer}>
-      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="contain" />
-      <Pressable style={styles.closeButton} onPress={onClose}>
-        <Text style={styles.closeText}>Close</Text>
-      </Pressable>
+      <VideoPlayerModal uri={playingUri} onClose={() => setPlayingUri(null)} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  topBarSpacer: { width: 50 },
-  backText: { fontSize: 16, color: '#007AFF' },
-  title: { fontSize: 17, fontWeight: '600' },
-  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  emptyText: { color: '#666', textAlign: 'center' },
+  container: { flex: 1, backgroundColor: colors.bg },
+  list: { paddingHorizontal: 20, paddingBottom: 24 },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  emptyText: { color: colors.muted, fontSize: 13, fontFamily: font.regular, textAlign: 'center', lineHeight: 19 },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ccc',
+    marginTop: 10,
   },
-  rowTitle: { fontSize: 15, fontWeight: '500' },
-  rowSubtitle: { fontSize: 13, color: '#666', marginTop: 2 },
-  rowActions: { flexDirection: 'row', gap: 20 },
-  shareText: { color: '#007AFF', fontSize: 14 },
-  deleteText: { color: '#FF3B30', fontSize: 14 },
-  playerContainer: { flex: 1, backgroundColor: '#000' },
-  closeButton: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
+  rowMain: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rowTitle: { color: colors.text, fontSize: 14.5, fontFamily: font.semibold },
+  rowSubtitle: { color: colors.muted, fontSize: 12, fontFamily: font.medium, marginTop: 2 },
+  rowActions: { flexDirection: 'row', gap: 18, alignItems: 'center', marginLeft: 12 },
+  deleteText: { color: colors.red, fontSize: 13, fontFamily: font.semibold },
+  pickBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.lime,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  closeText: { color: '#fff', fontSize: 14 },
 });

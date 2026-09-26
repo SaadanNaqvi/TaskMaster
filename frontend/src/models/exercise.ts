@@ -1,6 +1,6 @@
-export type Exercise = 'Bench Press' | 'Squat' | 'Lat Pulldown' | 'Deadlift';
+export type Exercise = 'Squat' | 'Bench Press' | 'Deadlift' | 'Lat Pulldown';
 
-export const EXERCISES: Exercise[] = ['Bench Press', 'Squat', 'Lat Pulldown', 'Deadlift'];
+export const EXERCISES: Exercise[] = ['Squat', 'Bench Press', 'Deadlift', 'Lat Pulldown'];
 
 /** Reminder shown on the record screen so every clip for an exercise is framed the same way. */
 export function framingHint(exercise: Exercise): string {

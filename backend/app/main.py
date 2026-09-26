@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
     def processJob(video, exerciseId):
         # get pkl file for exerciseID in server folders somehow 
         # combine pkl with video
+        return "path"
 
 
     return app

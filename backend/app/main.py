@@ -48,7 +48,15 @@ def create_app() -> FastAPI:
             raise RuntimeError("ffmpeg and ffprobe must be on PATH")
         load_jobs_on_startup()
 
+    @app.post('/jobs')
+    def processJob(video, exerciseId):
+        # get pkl file for exerciseID in server folders somehow 
+        # combine pkl with video
+
+
     return app
+
+
 
 
 app = create_app()

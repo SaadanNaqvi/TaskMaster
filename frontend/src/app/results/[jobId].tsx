@@ -149,6 +149,9 @@ export default function ResultsRoute() {
                   {showOverlay ? '3D preview overlay · placeholder' : 'Overlay hidden'}
                 </Chip>
               </Pressable>
+              <Pressable style={styles.viewerButton} onPress={() => router.push('/viewer')}>
+                <Chip background="rgba(0,0,0,0.6)">Open 3D view ↗</Chip>
+              </Pressable>
             </>
           ) : (
             <View style={[StyleSheet.absoluteFill, styles.videoFallback]}>
@@ -211,6 +214,7 @@ const styles = StyleSheet.create({
   video: { width: '100%', height: '100%' },
   overlaySvgWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   overlayToggle: { position: 'absolute', left: 12, bottom: 12 },
+  viewerButton: { position: 'absolute', right: 12, bottom: 12 },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   playBtnBig: {
     width: 56,

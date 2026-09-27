@@ -21,6 +21,7 @@ export default function RootLayout() {
         <Stack.Screen name="processing/[jobId]" options={{ gestureEnabled: false }} />
         <Stack.Screen name="results/[jobId]" />
         <Stack.Screen name="clips/[exercise]" />
+        <Stack.Screen name="viewer/index" />
       </Stack>
     </AnalysisProvider>
   );

@@ -93,13 +93,20 @@ def _correct_translation(trans: np.ndarray) -> np.ndarray:
     return trans * np.array([1.0, -1.0, -1.0], dtype=trans.dtype)
 
 
-def build_romp_model() -> romp.ROMP:
+DEFAULT_SMOOTH_COEFF = 1.0  # ROMP's own CLI default (-sc) is 3.0; smaller = smoother per its help
+# text. 1.0 trades a bit of responsiveness for noticeably less frame-to-frame jitter — worth it
+# here since every use of this output (the ambient overlay, the full viewer) is a slow exercise
+# rep, not fast motion where lag would matter.
+
+
+def build_romp_model(smooth_coeff: float = DEFAULT_SMOOTH_COEFF) -> romp.ROMP:
     settings = romp.main.default_settings
     settings.GPU = -1  # CPU-only: no CUDA on the dev/demo machine, and this runs offline anyway.
     settings.show_largest = True  # one person per clip (the user or the reference), side-on.
-    settings.temporal_optimize = True  # built-in OneEuro filter — smooths thetas/betas/cam
+    settings.temporal_optimize = True  # -t: built-in OneEuro filter — smooths thetas/betas/cam
     # across the calls below, since we reuse one instance in frame order. Replaces the old
     # script's manual EMA-on-landmarks smoothing.
+    settings.smooth_coeff = smooth_coeff  # -sc: OneEuro filter coefficient: smaller = smoother.
     settings.calc_smpl = False  # we only need thetas/betas/cam_trans, not verts/joints/mesh —
     # skipping the SMPL forward pass roughly doubles per-frame throughput on CPU.
     return romp.ROMP(settings)
@@ -107,6 +114,7 @@ def build_romp_model() -> romp.ROMP:
 
 def extract_smpl_sequence(
     video_path: Path,
+    smooth_coeff: float = DEFAULT_SMOOTH_COEFF,
 ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], float]:
     """Returns (poses, betas_per_frame, translations, fps). poses/betas/translations are one
     array per *detected* frame — frames with nobody detected hold the last good values, matching
@@ -116,7 +124,7 @@ def extract_smpl_sequence(
         raise RuntimeError(f'Could not open video: {video_path}')
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
 
-    romp_model = build_romp_model()
+    romp_model = build_romp_model(smooth_coeff)
 
     poses: list[np.ndarray] = []
     betas: list[np.ndarray] = []
@@ -146,8 +154,8 @@ def extract_smpl_sequence(
     return poses, betas, translations, fps
 
 
-def convert(video_path: Path, out_path: Path) -> None:
-    poses, betas, translations, fps = extract_smpl_sequence(video_path)
+def convert(video_path: Path, out_path: Path, smooth_coeff: float = DEFAULT_SMOOTH_COEFF) -> None:
+    poses, betas, translations, fps = extract_smpl_sequence(video_path, smooth_coeff)
     if not poses:
         raise RuntimeError(f'No person detected in any frame of {video_path}')
 
@@ -158,11 +166,16 @@ def convert(video_path: Path, out_path: Path) -> None:
     # pose-corrective blend shapes) — written here so it's ready once that's added.
     mean_betas = np.mean(np.stack(betas), axis=0)
 
-    # translations are already axis-corrected (see _correct_translation) — root-relative here
-    # (first frame subtracted) so playback starts near the origin regardless of where the person
-    # stood in frame.
+    # translations are already axis-corrected (see _correct_translation) — root-relative to the
+    # clip's median position (not frame 0!) so playback starts near the origin regardless of where
+    # the person stood in frame. Frame 0 specifically is a bad reference point: ROMP's OneEuro
+    # temporal filter needs its first ~15-20 frames to converge from an initial, unstable estimate
+    # (verified on a real clip — X drifted smoothly but substantially, ~0.07 to -1.75, over frames
+    # 0-20, then held steady for the remaining ~170) — subtracting frame 0 would make every stable
+    # frame in the clip look like it "walked away" from a starting position that was itself the
+    # outlier. The median is dominated by the many stable frames instead of the brief warmup.
     trans_arr = np.stack(translations)
-    trans_arr -= trans_arr[0]
+    trans_arr -= np.median(trans_arr, axis=0)
 
     payload = {
         'fps': fps,
@@ -181,8 +194,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--video', required=True, help='Path to the input video')
     parser.add_argument('--out', default='pose_sequence.json', help='Output JSON path')
+    parser.add_argument(
+        '-sc',
+        '--smooth-coeff',
+        type=float,
+        default=DEFAULT_SMOOTH_COEFF,
+        help=f'OneEuro filter coefficient (ROMP -sc) — smaller is smoother. Default {DEFAULT_SMOOTH_COEFF}.',
+    )
     args = parser.parse_args()
-    convert(Path(args.video), Path(args.out))
+    convert(Path(args.video), Path(args.out), args.smooth_coeff)
 
 
 if __name__ == '__main__':

@@ -71,14 +71,6 @@ export class SmplPoser {
     return global;
   }
 
-  /** World-space (mesh-local, pre-group-transform) position of one joint for the given pose —
-   * used to anchor/scale the mesh to a target on-screen position (see lib/smpl/align.ts). */
-  jointWorldPosition(pose: SmplPose, joint: number): THREE.Vector3 {
-    const global = this.globalTransforms(pose);
-    const e = global[joint].elements;
-    return new THREE.Vector3(e[12], e[13], e[14]);
-  }
-
   /** Writes skinned vertex positions for the given pose into `out` (length vertexCount*3). */
   pose(poseVec: SmplPose, out: Float32Array): void {
     const { vertexCount, jointCount, vertices, weights, poseCorrectiveJoints, poseDirs } = this.asset;

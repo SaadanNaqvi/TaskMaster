@@ -103,7 +103,7 @@ export default function SmplViewer({ poseSequence, translations, fps = 30 }: Smp
 
   const onContextCreate = (gl: ExpoWebGLRenderingContext) => {
     startedAt.current = Date.now();
-    const { poser, scene, mesh, geometry, positions, bounds } = createSmplScene(bodyModelJson, colors.lime, 1);
+    const { poser, scene, group, geometry, positions, bounds } = createSmplScene(bodyModelJson, colors.lime, 1);
 
     const renderer = new Renderer({ gl });
     renderer.setSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -137,7 +137,7 @@ export default function SmplViewer({ poseSequence, translations, fps = 30 }: Smp
         poser.pose(poseSequence[frameIndex], positions);
         const t = translations?.[frameIndex];
         root.set(t?.[0] ?? 0, t?.[1] ?? 0, t?.[2] ?? 0);
-        mesh.position.copy(root);
+        group.position.copy(root);
       } else {
         const elapsed = (Date.now() - (startedAt.current ?? Date.now())) % CYCLE_MS;
         const half = CYCLE_MS / 2;

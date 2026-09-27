@@ -6,10 +6,9 @@ import * as THREE from 'three';
 import { createSmplScene, lerpPose, smoothstep } from '../../lib/smpl/scene';
 import { STANDING_POSE, SQUAT_BOTTOM_POSE } from '../../lib/smpl/poses';
 import { SmplPose } from '../../lib/smpl/types';
+import { loadBodyModel } from '../../lib/smpl/bodyModel';
 import { colors } from '../../theme/colors';
 import { font } from '../../theme/typography';
-
-const bodyModelJson = require('../../../assets/smpl/body_model.json');
 
 const CYCLE_MS = 2200;
 const MIN_ELEVATION = -1.3;
@@ -54,8 +53,10 @@ export default function SmplViewer({ poseSequence, translations, fps = 30 }: Smp
   const pinchStart = useRef<number | null>(null);
   const distanceScaleAtPinchStart = useRef(1);
 
+  const mountedRef = useRef(true);
   useEffect(
     () => () => {
+      mountedRef.current = false;
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     },
     []
@@ -101,7 +102,10 @@ export default function SmplViewer({ poseSequence, translations, fps = 30 }: Smp
     })
   );
 
-  const onContextCreate = (gl: ExpoWebGLRenderingContext) => {
+  const onContextCreate = async (gl: ExpoWebGLRenderingContext) => {
+    const bodyModelJson = await loadBodyModel();
+    if (!mountedRef.current) return;
+
     startedAt.current = Date.now();
     const { poser, scene, group, geometry, positions, bounds } = createSmplScene(bodyModelJson, colors.lime, 1);
 

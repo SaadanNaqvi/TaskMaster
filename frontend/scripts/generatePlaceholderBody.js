@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * Generates frontend/assets/smpl/body_model.json — a small procedural "articulated mannequin"
+ * Generates frontend/assets/smpl/body_model.smplmesh — a small procedural "articulated mannequin"
  * mesh (boxes between joints) using SMPL's standard 24-joint topology, so the 3D overlay pipeline
  * has something valid to load before a real SMPL .pkl has been converted (see
  * backend/scripts/convert_smpl.py, which overwrites this exact file with the real mesh).
  *
  * This mesh is 100% procedural — no SMPL data, geometry, or weights are used — so it's fine to
- * commit to git, unlike a real converted SMPL asset.
+ * commit to git, unlike a real converted SMPL asset. (The `.smplmesh` extension, not `.json`, is
+ * so Metro bundles it as a binary asset instead of inlining it into the JS bundle — see
+ * frontend/metro.config.js and frontend/src/lib/smpl/bodyModel.ts. Content is still plain JSON.)
  *
  * Run: node scripts/generatePlaceholderBody.js
  */
@@ -155,7 +157,7 @@ const payload = {
   parents: PARENTS,
 };
 
-const outPath = path.join(__dirname, '..', 'assets', 'smpl', 'body_model.json');
+const outPath = path.join(__dirname, '..', 'assets', 'smpl', 'body_model.smplmesh');
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, JSON.stringify(payload));
 console.log(`Wrote ${outPath} (${(fs.statSync(outPath).size / 1024).toFixed(0)} KB) — ${vertexCount} vertices, ${JOINT_COUNT} joints`);

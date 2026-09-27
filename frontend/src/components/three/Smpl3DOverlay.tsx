@@ -9,13 +9,9 @@ import { STANDING_POSE, SQUAT_BOTTOM_POSE } from '../../lib/smpl/poses';
 import { SmplPose } from '../../lib/smpl/types';
 import { coverFit, coverFitPoint, stableAnklePx, stableHipPx } from '../../lib/smpl/align';
 import { AlignDebugger, AlignDebugFrame } from '../../lib/smpl/alignDebug';
+import { loadBodyModel } from '../../lib/smpl/bodyModel';
 import type { ApiPoseFrame } from '../../services/apiGateway';
 import { colors } from '../../theme/colors';
-
-// Committed procedural placeholder by default (see frontend/scripts/generatePlaceholderBody.js).
-// backend/scripts/convert_smpl.py overwrites this exact file with the real SMPL mesh once you
-// have a licensed .pkl — same path, so nothing here needs to change when that happens.
-const bodyModelJson = require('../../../assets/smpl/body_model.json');
 
 const CYCLE_MS = 2200;
 // How long to stay hidden waiting for the one-time screen-offset solve before giving up and
@@ -121,14 +117,19 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
   const liveData = useRef({ poseSequence, translations, fps, player, userPoseFrames, userVideoWidth, userVideoHeight });
   liveData.current = { poseSequence, translations, fps, player, userPoseFrames, userVideoWidth, userVideoHeight };
 
+  const mountedRef = useRef(true);
   useEffect(
     () => () => {
+      mountedRef.current = false;
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     },
     []
   );
 
-  const onContextCreate = (gl: ExpoWebGLRenderingContext) => {
+  const onContextCreate = async (gl: ExpoWebGLRenderingContext) => {
+    const bodyModelJson = await loadBodyModel();
+    if (!mountedRef.current) return;
+
     startedAt.current = Date.now();
     const { asset, poser, scene, group, geometry, positions, bounds } = createSmplScene(bodyModelJson, colors.lime, opacity);
     groupRef.current = group;

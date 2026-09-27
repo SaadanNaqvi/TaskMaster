@@ -24,10 +24,11 @@ Usage:
     pip install numpy     # any recent version — no special pin needed, see below
     python3 -m scripts.convert_smpl --input pose/models/smpl/SMPL_NEUTRAL.pkl
 
-This overwrites frontend/assets/smpl/body_model.json in place — that exact path is committed to
-the repo with a small procedural placeholder mesh so the app always has *something* to load without
-a bundler error. Once you run this script it becomes the real SMPL mesh. If this repo is or becomes
-public, don't commit that overwrite back — SMPL's license doesn't allow redistributing the model.
+This overwrites frontend/assets/smpl/body_model.smplmesh in place (content is plain JSON despite
+the extension — see --output help) — that exact path is committed to the repo with a small
+procedural placeholder mesh so the app always has *something* to load without a bundler error.
+Once you run this script it becomes the real SMPL mesh. If this repo is or becomes public, don't
+commit that overwrite back — SMPL's license doesn't allow redistributing the model.
 
 Why there's no `chumpy` dependency here, on purpose
 ----------------------------------------------------
@@ -184,8 +185,10 @@ def main() -> None:
     parser.add_argument('--input', required=True, help='Path to the SMPL .pkl file')
     parser.add_argument(
         '--output',
-        default='../frontend/assets/smpl/body_model.json',
-        help='Output JSON path (default: ../frontend/assets/smpl/body_model.json)',
+        default='../frontend/assets/smpl/body_model.smplmesh',
+        help='Output path (default: ../frontend/assets/smpl/body_model.smplmesh). Content is plain '
+        "JSON; the extension is deliberately not .json so Metro bundles it as a binary asset "
+        'instead of inlining it into the JS bundle.',
     )
     args = parser.parse_args()
     convert(Path(args.input), Path(args.output))

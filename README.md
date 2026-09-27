@@ -59,7 +59,10 @@ ls -lh backend/data/library/*/video.mp4 backend/pose/models/smpl/*.pkl
 > normally prohibits redistributing those model files. They're committed
 > here only because this repo is private and the team has permission to
 > share internally — don't make this repo public (or fork it publicly)
-> without stripping `backend/pose/models/smpl/*.pkl` from history first.
+> without stripping `backend/pose/models/smpl/*.pkl` **and**
+> `frontend/assets/smpl/body_model.smplmesh` from history first (the latter
+> is a JSON-format mesh converted from the licensed `.pkl` via
+> `backend/scripts/convert_smpl.py` — same restriction applies to it).
 
 ## 1. Backend
 

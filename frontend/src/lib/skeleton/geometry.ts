@@ -2,14 +2,17 @@ import { ApiAlignmentFrame, ApiPoseFrame } from '../../services/apiGateway';
 
 export type Side = 'left' | 'right';
 export type Pt = { x: number; y: number };
-export type Bone = [Pt, Pt];
+/** `far` marks bones on the body side facing away from the camera — drawn fainter, since angles are
+ * only measured on the camera side and MediaPipe is mostly guessing at the occluded far limbs. */
+export type Bone = { a: Pt; b: Pt; far: boolean };
 
 /** Same cutoff the backend's angles.py uses — below it a landmark is treated as not seen. */
 const MIN_VISIBILITY = 0.5;
+/** Looser cutoff for just drawing the figure, so the (often low-visibility) far side still shows. */
+const DRAW_MIN_VISIBILITY = 0.1;
 
-// Stick figure for one side of the body in MediaPipe's 33-landmark indices (left side; the right
-// side is each index + 1, except the nose). Only the camera-facing side is drawn — it's the side
-// the angles are measured on, and the far side is mostly occluded noise in a side-on clip.
+// One side of the body in MediaPipe's 33-landmark indices (left side; the right side is each
+// index + 1, except the nose).
 const LEFT_BONES: [number, number][] = [
   [0, 11], // nose - shoulder
   [11, 13], // shoulder - elbow
@@ -21,6 +24,11 @@ const LEFT_BONES: [number, number][] = [
   [29, 31], // heel - toe
   [27, 31], // ankle - toe
 ];
+// Bones joining the two sides.
+const CROSS_BONES: [number, number][] = [
+  [11, 12], // shoulder - shoulder
+  [23, 24], // hip - hip
+];
 
 // Landmark each measured joint's angle sits at (backend/app/pipeline/angles.py), left side.
 const LEFT_JOINT_LANDMARK: Record<string, number> = { shoulder: 11, elbow: 13, hip: 23, knee: 25, ankle: 27 };
@@ -29,20 +37,26 @@ function sideIndex(i: number, side: Side): number {
   return i === 0 || side === 'left' ? i : i + 1;
 }
 
-export function landmark(frame: ApiPoseFrame | undefined, i: number): Pt | null {
+export function landmark(frame: ApiPoseFrame | undefined, i: number, minVisibility = MIN_VISIBILITY): Pt | null {
   const lm = frame?.landmarks[i];
-  if (!lm || lm[3] < MIN_VISIBILITY) return null;
+  if (!lm || lm[3] < minVisibility) return null;
   return { x: lm[0], y: lm[1] };
 }
 
-/** The visible bones of one side of the body, each end passed through `map`. */
-export function skeletonBones(frame: ApiPoseFrame | undefined, side: Side, map: (p: Pt) => Pt): Bone[] {
+/** The whole-body stick figure, each end passed through `map`. `cameraSide` is the side the
+ * angles were measured on; the other side's bones come back flagged `far`. */
+export function skeletonBones(frame: ApiPoseFrame | undefined, cameraSide: Side, map: (p: Pt) => Pt): Bone[] {
   const bones: Bone[] = [];
-  for (const [a, b] of LEFT_BONES) {
-    const pa = landmark(frame, sideIndex(a, side));
-    const pb = landmark(frame, sideIndex(b, side));
-    if (pa && pb) bones.push([map(pa), map(pb)]);
-  }
+  const add = (i: number, j: number, far: boolean) => {
+    const pa = landmark(frame, i, DRAW_MIN_VISIBILITY);
+    const pb = landmark(frame, j, DRAW_MIN_VISIBILITY);
+    if (pa && pb) bones.push({ a: map(pa), b: map(pb), far });
+  };
+  const farSide: Side = cameraSide === 'left' ? 'right' : 'left';
+  // Far side first so the camera side draws on top of it.
+  for (const [i, j] of LEFT_BONES) add(sideIndex(i, farSide), sideIndex(j, farSide), true);
+  for (const [i, j] of CROSS_BONES) add(i, j, false);
+  for (const [i, j] of LEFT_BONES) add(sideIndex(i, cameraSide), sideIndex(j, cameraSide), false);
   return bones;
 }
 

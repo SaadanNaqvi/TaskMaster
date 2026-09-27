@@ -10,6 +10,8 @@ import { colors } from '../../theme/colors';
 
 const USER_COLOR = colors.cyan;
 const REF_COLOR = colors.muted;
+/** The side facing away from the camera is drawn fainter — angles are only measured on the near side. */
+const FAR_OPACITY = 0.45;
 
 interface Props {
   result: ApiJobResult;
@@ -49,11 +51,12 @@ function useSize() {
 function Figure({ bones, color, width }: { bones: Bone[]; color: string; width: number }) {
   return (
     <G>
-      {bones.map(([a, b], i) => (
-        <Line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={width} strokeLinecap="round" />
-      ))}
-      {bones.map(([a], i) => (
-        <Circle key={`j${i}`} cx={a.x} cy={a.y} r={width * 0.9} fill={color} />
+      {bones.map(({ a, b, far }, i) => (
+        <G key={i} opacity={far ? FAR_OPACITY : 1}>
+          <Line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={width} strokeLinecap="round" />
+          <Circle cx={a.x} cy={a.y} r={width * 0.9} fill={color} />
+          <Circle cx={b.x} cy={b.y} r={width * 0.9} fill={color} />
+        </G>
       ))}
     </G>
   );

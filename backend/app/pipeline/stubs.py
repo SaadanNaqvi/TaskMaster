@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from ..schemas import AlignmentFrame, FormReport, PoseFrame, PoseSequence, RepWindow
+from ..schemas import PoseFrame, PoseSequence, RepWindow
 
 
 def _make_landmark(x: float, y: float, z: float, visibility: float = 1.0) -> list[float]:
@@ -37,39 +37,3 @@ def find_rep(pose: PoseSequence, exercise: str) -> RepWindow:
     if not pose.frames:
         raise ValueError("pose has no frames")
     return RepWindow(start=0, end=max(len(pose.frames) - 1, 0), bottom=len(pose.frames) // 2)
-
-
-def sync(user: PoseSequence, user_rep: RepWindow, ref: PoseSequence, ref_rep: RepWindow):
-    pairs = []
-    for idx in range(min(len(user.frames), len(ref.frames))):
-        pairs.append((float(idx), float(idx)))
-    return pairs
-
-
-def align(user: PoseSequence, ref: PoseSequence, pairs):
-    result = []
-    for user_frame, ref_frame in pairs:
-        result.append(
-            AlignmentFrame(
-                user_frame=int(user_frame),
-                ref_frame=int(ref_frame),
-                anchor=[320.0, 240.0],
-                scale=1.0,
-            )
-        )
-    return result
-
-
-def score(user: PoseSequence, ref: PoseSequence, alignment, exercise: str) -> FormReport:
-    score_value = 94.0
-    return FormReport(
-        score=score_value,
-        per_joint={
-            "knee_l": {"max_diff_deg": 6.0, "frames_flagged": [2, 5]},
-            "hip_l": {"max_diff_deg": 4.0, "frames_flagged": [1]},
-        },
-        flags=[
-            {"frame": 2, "joint": "knee_l", "diff_deg": 8.0, "message": "Slight knee collapse"},
-            {"frame": 5, "joint": "knee_l", "diff_deg": 6.0, "message": "Knee alignment drift"},
-        ],
-    )

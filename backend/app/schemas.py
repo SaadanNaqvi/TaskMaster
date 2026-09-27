@@ -117,20 +117,51 @@ class RepWindow(BaseModel):
 
 
 class AlignmentFrame(BaseModel):
+    """Places the reference skeleton over the user's for display: a reference landmark p maps to
+    anchor + scale * (p - ref_anchor), with its x offset negated first when mirror is set."""
+
     model_config = ConfigDict(extra="forbid")
 
     user_frame: int = Field(..., ge=0)
     ref_frame: int = Field(..., ge=0)
     anchor: list[float] = Field(..., min_length=2, max_length=2)
+    ref_anchor: list[float] = Field(..., min_length=2, max_length=2)
     scale: float = Field(..., gt=0)
+    mirror: bool = False
+
+
+class JointDelta(BaseModel):
+    """One joint's user-minus-reference angle difference in degrees. Positive means the user's
+    angle is larger (e.g. knee straighter); None where it couldn't be measured."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    delta_at_bottom: float | None
+    user_at_bottom: float | None
+    ref_at_bottom: float | None
+    max_delta: float | None
+    max_delta_frame: int | None = Field(None, ge=0)
+    measured_fraction: float = Field(..., ge=0.0, le=1.0)
+    message: str | None
+
+
+class FrameDelta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_frame: int = Field(..., ge=0)
+    ref_frame: int = Field(..., ge=0)
+    deltas: dict[str, float | None]
 
 
 class FormReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    score: float = Field(..., ge=0.0, le=100.0)
-    per_joint: dict[str, dict[str, Any]]
-    flags: list[dict[str, Any]]
+    user_side: Literal["left", "right"]
+    ref_side: Literal["left", "right"]
+    bottom_frame: int = Field(..., ge=0)
+    # Ordered by largest |max_delta| first; unmeasurable joints last.
+    per_joint: dict[str, JointDelta]
+    frames: list[FrameDelta]
 
 
 class JobResult(BaseModel):

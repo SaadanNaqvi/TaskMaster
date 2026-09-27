@@ -7,7 +7,7 @@ import traceback
 from pathlib import Path
 
 from ..catalogue import get_exercise
-from ..config import LIBRARY_DIR, MAX_CONCURRENT_JOBS, STUB_DELAY_S, STUB_MODE
+from ..config import LIBRARY_DIR, MAX_CONCURRENT_JOBS, STUB_DELAY_S
 from ..media import prepare, thumbnail, to_url
 from ..schemas import PoseSequence
 from ..storage import get_job, job_dir, update_job
@@ -23,9 +23,9 @@ RUNNER_LOCK = threading.Semaphore(MAX_CONCURRENT_JOBS)
 
 
 def _extract_pose(video_path: str | Path):
-    # Unlike sync/align/score below, real pose extraction doesn't depend on STUB_MODE being
-    # turned off — it's genuinely implemented, has no bearing on whether the rest of the (still
-    # partly stubbed) pipeline can run, and real landmarks are what the mobile app's 3D overlay
+    # Like the comparison below, real pose extraction doesn't depend on STUB_MODE being
+    # turned off — it's genuinely implemented, has no bearing on whether the rest of the
+    # pipeline can run, and real landmarks are what the mobile app's 3D overlay
     # needs to actually align to the user (see frontend/src/lib/smpl/align.ts). It opportunistically
     # uses the real MediaPipe environment when set up, falling back to the synthetic stub only when
     # that environment isn't available (e.g. a fresh clone with no .venv-pose yet) — so this never
@@ -45,28 +45,15 @@ def _find_rep(pose, exercise: str):
     return stubs.find_rep(pose, exercise)
 
 
-def _sync(user, user_rep, ref, ref_rep):
-    if STUB_MODE:
-        return stubs.sync(user, user_rep, ref, ref_rep)
+def _compare(user, user_rep, ref, ref_rep):
+    # Sync/align/score are the skeleton angle comparison — pure Python over already-extracted
+    # poses, so like _find_rep they always run for real regardless of STUB_MODE (a stubbed
+    # comparison would just show made-up degrees).
     if pipeline_real is None:
         raise NotImplementedError("Real pipeline not available")
-    return pipeline_real.sync(user, user_rep, ref, ref_rep)
-
-
-def _align(user, ref, pairs):
-    if STUB_MODE:
-        return stubs.align(user, ref, pairs)
-    if pipeline_real is None:
-        raise NotImplementedError("Real pipeline not available")
-    return pipeline_real.align(user, ref, pairs)
-
-
-def _score(user, ref, alignment, exercise: str):
-    if STUB_MODE:
-        return stubs.score(user, ref, alignment, exercise)
-    if pipeline_real is None:
-        raise NotImplementedError("Real pipeline not available")
-    return pipeline_real.score(user, ref, alignment, exercise)
+    pairs = pipeline_real.sync(user, user_rep, ref, ref_rep)
+    alignment = pipeline_real.align(user, ref, pairs)
+    return alignment, pipeline_real.score(user, ref, alignment, user_rep)
 
 
 def _load_reference_pose(reference_id: str):
@@ -115,13 +102,11 @@ def run_job(job_id: str):
                 time.sleep(STUB_DELAY_S)
             user_rep = _find_rep(user_pose, exercise)
             ref_rep = _find_rep(ref_pose, exercise)
-            alignment_pairs = _sync(user_pose, user_rep, ref_pose, ref_rep)
-            alignment = _align(user_pose, ref_pose, alignment_pairs)
 
             update_job(job_id, status="scoring", progress=0.8)
             if STUB_DELAY_S:
                 time.sleep(STUB_DELAY_S)
-            form_report = _score(user_pose, ref_pose, alignment, exercise)
+            alignment, form_report = _compare(user_pose, user_rep, ref_pose, ref_rep)
 
             result = {
                 "job_id": job_id,

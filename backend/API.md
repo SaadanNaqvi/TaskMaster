@@ -305,28 +305,49 @@ Response:
   "job_id": "8f3d9c5e1a2b",
   "video_url": "/files/outputs/8f3d9c5e1a2b/prepared.mp4",
   "form_report": {
-    "score": 94.0,
+    "user_side": "left",
+    "ref_side": "right",
+    "bottom_frame": 42,
     "per_joint": {
-      "knee_l": {
-        "max_diff_deg": 6.0,
-        "frames_flagged": [2, 5]
+      "knee": {
+        "delta_at_bottom": -11.8,
+        "user_at_bottom": 78.2,
+        "ref_at_bottom": 90.0,
+        "max_delta": -12.4,
+        "max_delta_frame": 45,
+        "measured_fraction": 0.97,
+        "message": "Knee: 12° more bent than reference"
       }
     },
-    "flags": [
+    "frames": [
       {
-        "frame": 2,
-        "joint": "knee_l",
-        "diff_deg": 8.0,
-        "message": "Slight knee collapse"
+        "user_frame": 0,
+        "ref_frame": 0,
+        "deltas": {"trunk": 1.2, "shoulder": -0.4, "elbow": null, "hip": 2.1, "knee": 0.3, "ankle": -1.0}
       }
     ]
   },
   "user_pose": {},
   "ref_pose": {},
-  "alignment": [],
+  "alignment": [
+    {"user_frame": 0, "ref_frame": 0, "anchor": [312.0, 540.5], "ref_anchor": [640.2, 510.0], "scale": 0.92, "mirror": true}
+  ],
   "exercise": "squat"
 }
 ```
+
+`form_report` is the skeleton comparison: 2D joint angles measured on the camera-facing side of each
+body (`user_side` / `ref_side`), synced so both reps hit their bottom together. Every number is a
+signed difference in degrees, user minus reference; positive means the user's angle is larger (knee
+or elbow straighter, hip more open, shoulder more raised, shin more upright, trunk leaning more).
+Trunk is lean from vertical rather than a three-point angle. `null` means the joint wasn't visible
+enough to measure; `measured_fraction` is how much of the rep it was measured over. `per_joint` is
+ordered by largest `|max_delta|` first. There is no overall score.
+
+`frames` has one entry per user frame in the rep, paired with the matching reference frame, for
+labelling joints during playback. `alignment` lays the reference skeleton over the user's for
+display: a reference landmark `p` maps to `anchor + scale * (p - ref_anchor)`, negating the x offset
+first when `mirror` is true.
 
 Status codes:
 

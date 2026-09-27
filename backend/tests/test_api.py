@@ -47,6 +47,7 @@ def test_create_job_and_result(client):
     payload = result.json()
     assert payload["exercise"] == "squat"
     assert payload["video_url"].startswith("/files/outputs/")
+    assert "per_joint" in payload["form_report"] and "score" not in payload["form_report"]
 
 
 def test_static_file_range(client):

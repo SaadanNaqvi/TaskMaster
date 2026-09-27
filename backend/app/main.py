@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from starlette.staticfiles import StaticFiles
@@ -13,7 +13,6 @@ from .routers.exercises import router as exercises_router
 from .routers.jobs import router as jobs_router
 from .routers.references import router as references_router
 from .storage import load_jobs_on_startup
-
 
 def create_app() -> FastAPI:
     ensure_data_dirs()
@@ -48,7 +47,16 @@ def create_app() -> FastAPI:
             raise RuntimeError("ffmpeg and ffprobe must be on PATH")
         load_jobs_on_startup()
 
+
+    @app.post('/gemini-feedback')
+    async def processJobs(video: UploadFile = File(...)) -> dict[str, str]:
+        from .call_gemini.gemini_llm import get_llm_feedback
+
+        feedback = get_llm_feedback(await video.read())
+        return {"feedback": feedback}
+
     return app
+
 
 
 app = create_app()

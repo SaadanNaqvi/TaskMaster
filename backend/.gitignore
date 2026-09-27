@@ -2,6 +2,8 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
+.env
+frame*.jpg
 
 # SMPL body model files are license-gated (smpl.is.tue.mpg.de) and must not be redistributed.
 pose/models/smpl/*.pkl

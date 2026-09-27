@@ -1,5 +1,5 @@
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import type { SmplAssetJson } from './types';
 
 // A `.smplmesh` extension (not `.json`) so Metro treats it as a binary asset (see
@@ -21,8 +21,7 @@ export function loadBodyModel(): Promise<SmplAssetJson> {
       const asset = Asset.fromModule(bodyModelModule);
       await asset.downloadAsync();
       const uri = asset.localUri ?? asset.uri;
-      const text = await FileSystem.readAsStringAsync(uri);
-      return JSON.parse(text) as SmplAssetJson;
+      return (await new File(uri).json()) as SmplAssetJson;
     })();
   }
   return cached;

@@ -7,6 +7,10 @@ export interface SmplScene {
   poser: SmplPoser;
   scene: THREE.Scene;
   mesh: THREE.Mesh;
+  /** Wraps `mesh` — manipulate this (not `mesh` directly) to position/scale/rotate the whole body
+   * as a unit, e.g. for screen-space alignment (lib/smpl/align.ts), while `mesh`'s own vertex
+   * positions stay purely a function of the current pose. */
+  group: THREE.Group;
   geometry: THREE.BufferGeometry;
   positions: Float32Array;
   /** Vertical center + height of the mesh's rest-pose bounds, since different SMPL-topology
@@ -47,9 +51,11 @@ export function createSmplScene(json: SmplAssetJson, color: THREE.ColorRepresent
     side: THREE.DoubleSide,
   });
   const mesh = new THREE.Mesh(geometry, material);
-  scene.add(mesh);
+  const group = new THREE.Group();
+  group.add(mesh);
+  scene.add(group);
 
-  return { asset, poser, scene, mesh, geometry, positions, bounds };
+  return { asset, poser, scene, mesh, group, geometry, positions, bounds };
 }
 
 export function lerpPose(a: Float32Array, b: Float32Array, t: number): Float32Array {

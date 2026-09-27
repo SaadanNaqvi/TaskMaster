@@ -26,6 +26,9 @@ export interface SmplViewerProps {
    * jointCount*3 axis-angle array. When absent, loops a placeholder stand/squat animation instead.
    */
   poseSequence?: SmplPose[] | null;
+  /** Per-frame root translation (meters, ROMP's weak-perspective camera space), same length and
+   * indexing as poseSequence. Optional — omitted for the placeholder loop, which never moves. */
+  translations?: [number, number, number][] | null;
   fps?: number;
 }
 
@@ -34,9 +37,16 @@ export interface SmplViewerProps {
  * as the ambient results-screen overlay, just with real camera controls and (once available) a
  * real per-frame pose sequence instead of the placeholder loop.
  */
-export default function SmplViewer({ poseSequence, fps = 30 }: SmplViewerProps) {
+export default function SmplViewer({ poseSequence, translations, fps = 30 }: SmplViewerProps) {
   const startedAt = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
+
+  // expo-gl calls onContextCreate exactly once, when the GL context is created — never again on
+  // re-renders. Its render loop must read pose data through a ref kept up to date every render,
+  // not by closing over these props directly, or a pose sequence that arrives after first mount
+  // (e.g. fetched async) would never be seen by the already-running loop.
+  const liveData = useRef({ poseSequence, translations, fps });
+  liveData.current = { poseSequence, translations, fps };
 
   const azimuth = useRef(Math.PI / 2); // start side-on
   const elevation = useRef(0.15);
@@ -93,7 +103,7 @@ export default function SmplViewer({ poseSequence, fps = 30 }: SmplViewerProps) 
 
   const onContextCreate = (gl: ExpoWebGLRenderingContext) => {
     startedAt.current = Date.now();
-    const { poser, scene, geometry, positions, bounds } = createSmplScene(bodyModelJson, colors.lime, 1);
+    const { poser, scene, mesh, geometry, positions, bounds } = createSmplScene(bodyModelJson, colors.lime, 1);
 
     const renderer = new Renderer({ gl });
     renderer.setSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -102,23 +112,32 @@ export default function SmplViewer({ poseSequence, fps = 30 }: SmplViewerProps) 
     const camera = new THREE.PerspectiveCamera(35, gl.drawingBufferWidth / gl.drawingBufferHeight, 0.1, 100);
     const baseDistance = bounds.height * 1.7;
 
+    // Root translation of the current frame, applied to the whole mesh — the camera orbits
+    // around this point too, so a real (ROMP-derived) sequence stays framed as the person moves,
+    // e.g. sinking into a squat, instead of drifting out of view.
+    const root = new THREE.Vector3(0, 0, 0);
+
     const updateCamera = () => {
       const r = baseDistance * distanceScale.current;
       const el = elevation.current;
       const az = azimuth.current;
       camera.position.set(
-        r * Math.cos(el) * Math.sin(az),
-        bounds.centerY + r * Math.sin(el),
-        r * Math.cos(el) * Math.cos(az)
+        root.x + r * Math.cos(el) * Math.sin(az),
+        bounds.centerY + root.y + r * Math.sin(el),
+        root.z + r * Math.cos(el) * Math.cos(az)
       );
-      camera.lookAt(0, bounds.centerY, 0);
+      camera.lookAt(root.x, bounds.centerY + root.y, root.z);
     };
 
     const updatePose = () => {
+      const { poseSequence, translations, fps } = liveData.current;
       if (poseSequence && poseSequence.length > 0) {
         const elapsed = (Date.now() - (startedAt.current ?? Date.now())) / 1000;
-        const frameIndex = Math.floor(elapsed * fps) % poseSequence.length;
+        const frameIndex = Math.floor(elapsed * (fps ?? 30)) % poseSequence.length;
         poser.pose(poseSequence[frameIndex], positions);
+        const t = translations?.[frameIndex];
+        root.set(t?.[0] ?? 0, t?.[1] ?? 0, t?.[2] ?? 0);
+        mesh.position.copy(root);
       } else {
         const elapsed = (Date.now() - (startedAt.current ?? Date.now())) % CYCLE_MS;
         const half = CYCLE_MS / 2;

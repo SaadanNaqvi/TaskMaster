@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import Screen from '../../components/ui/Screen';
 import ScreenHeader from '../../components/ui/ScreenHeader';
@@ -8,11 +8,12 @@ import Card from '../../components/ui/Card';
 import Chip from '../../components/ui/Chip';
 import ScoreRing from '../../components/ui/ScoreRing';
 import { PlayIcon, ShareIcon } from '../../components/icons/MiscIcons';
-import Smpl3DOverlay from '../../components/three/Smpl3DOverlay';
+import Smpl3DOverlay, { Smpl3DOverlayHandle } from '../../components/three/Smpl3DOverlay';
 import { ApiJobResult, getJobResult, getJobStatus, getReferences, mediaUrl } from '../../services/apiGateway';
 import { useCatalogue, findExerciseName } from '../../services/catalogue';
 import { useAnalysis } from '../../state/AnalysisContext';
 import { formatJointName } from '../../utils/jointNames';
+import { SmplPose } from '../../lib/smpl/types';
 import { colors, radii } from '../../theme/colors';
 import { font } from '../../theme/typography';
 
@@ -26,6 +27,12 @@ export default function ResultsRoute() {
   const [result, setResult] = useState<ApiJobResult | null>(cached?.result ?? null);
   const [error, setError] = useState<string | null>(null);
   const [fallbackReferenceName, setFallbackReferenceName] = useState<string | null>(null);
+  const [refSmplPose, setRefSmplPose] = useState<{
+    poseSequence: SmplPose[];
+    translations: [number, number, number][];
+    fps: number;
+  } | null>(null);
+  const [refSmplPoseUrl, setRefSmplPoseUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (result) return;
@@ -34,20 +41,32 @@ export default function ResultsRoute() {
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load result'));
   }, [jobId, result]);
 
-  // Only needed when this screen is opened cold (deep link, or history from a previous app session) —
-  // the normal navigation flow already carries the reference name along as a param.
+  // Looks up the reference used for this job — always needed for the 3D overlay's real pose data,
+  // and (when opened cold, e.g. a deep link) for the name too, since the normal navigation flow
+  // already carries that along as a param instead.
   useEffect(() => {
-    if (cached || !result) return;
+    if (!result) return;
     let cancelled = false;
     (async () => {
       try {
-        const status = await getJobStatus(jobId);
-        if (!status.reference_id) return;
+        const referenceId = cached?.referenceId ?? (await getJobStatus(jobId)).reference_id;
+        if (!referenceId) return;
         const refs = await getReferences(result.exercise);
-        const match = refs.find((r) => r.id === status.reference_id);
-        if (!cancelled && match) setFallbackReferenceName(match.name);
+        const match = refs.find((r) => r.id === referenceId);
+        if (!match || cancelled) return;
+        if (!cached) setFallbackReferenceName(match.name);
+        if (!match.smpl_pose_url) return;
+        setRefSmplPoseUrl(match.smpl_pose_url);
+        const response = await fetch(mediaUrl(match.smpl_pose_url)!);
+        const json = await response.json();
+        if (cancelled) return;
+        setRefSmplPose({
+          poseSequence: json.frames.map((f: { pose: number[] }) => Float32Array.from(f.pose)),
+          translations: json.frames.map((f: { trans: [number, number, number] }) => f.trans),
+          fps: json.fps,
+        });
       } catch {
-        // best-effort only — falls back to the generic "reference" label
+        // best-effort only — falls back to the generic name / placeholder overlay animation
       }
     })();
     return () => {
@@ -64,6 +83,40 @@ export default function ResultsRoute() {
   });
   const [isPlaying, setIsPlaying] = useState(false);
   const [showOverlay, setShowOverlay] = useState(true);
+  const overlayRef = useRef<Smpl3DOverlayHandle>(null);
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+  const dragLastX = useRef(0);
+
+  // Shares one touch target between tap-to-play/pause and drag-to-rotate-the-3D-overlay-while-
+  // paused, rather than stacking a second responder on top of this one — reliably making plain
+  // taps "fall through" a view that sits on top for drag purposes is fragile in RN's responder
+  // system, so tap-vs-drag is disambiguated once, here, by total movement on release.
+  // eslint-disable-next-line react-hooks/refs
+  const [videoTouchResponder] = useState(() =>
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        dragLastX.current = 0;
+      },
+      onPanResponderMove: (_evt, gesture) => {
+        if (isPlayingRef.current) return;
+        overlayRef.current?.rotateBy((gesture.dx - dragLastX.current) * 0.01);
+        dragLastX.current = gesture.dx;
+      },
+      onPanResponderRelease: (_evt, gesture) => {
+        const moved = Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4;
+        if (moved) return;
+        if (isPlayingRef.current) {
+          player.pause();
+        } else {
+          player.play();
+        }
+        setIsPlaying(!isPlayingRef.current);
+      },
+    })
+  );
 
   const handleShare = () => {
     if (!result) return;
@@ -124,32 +177,45 @@ export default function ResultsRoute() {
               />
               {showOverlay && (
                 <View style={styles.overlaySvgWrap} pointerEvents="none">
-                  <Smpl3DOverlay opacity={0.85} />
+                  <Smpl3DOverlay
+                    ref={overlayRef}
+                    opacity={0.85}
+                    poseSequence={refSmplPose?.poseSequence}
+                    translations={refSmplPose?.translations}
+                    fps={refSmplPose?.fps}
+                    player={player}
+                    userPoseFrames={result.user_pose.frames}
+                    userVideoWidth={result.user_pose.width}
+                    userVideoHeight={result.user_pose.height}
+                  />
                 </View>
               )}
-              <Pressable
-                style={styles.playOverlay}
-                onPress={() => {
-                  if (isPlaying) {
-                    player.pause();
-                  } else {
-                    player.play();
-                  }
-                  setIsPlaying(!isPlaying);
-                }}
-              >
+              <View style={styles.playOverlay} {...videoTouchResponder.panHandlers}>
                 {!isPlaying && (
                   <View style={styles.playBtnBig}>
                     <PlayIcon size={20} />
                   </View>
                 )}
-              </Pressable>
+              </View>
               <Pressable style={styles.overlayToggle} onPress={() => setShowOverlay((v) => !v)}>
                 <Chip background="rgba(0,0,0,0.6)" dot={colors.lime}>
-                  {showOverlay ? '3D preview overlay · placeholder' : 'Overlay hidden'}
+                  {showOverlay
+                    ? refSmplPose
+                      ? `3D overlay · ${referenceName}`
+                      : '3D preview overlay · placeholder'
+                    : 'Overlay hidden'}
                 </Chip>
               </Pressable>
-              <Pressable style={styles.viewerButton} onPress={() => router.push('/viewer')}>
+              <Pressable
+                style={styles.viewerButton}
+                onPress={() =>
+                  router.push(
+                    refSmplPoseUrl
+                      ? `/viewer?smplPoseUrl=${encodeURIComponent(refSmplPoseUrl)}&referenceName=${encodeURIComponent(referenceName)}`
+                      : '/viewer'
+                  )
+                }
+              >
                 <Chip background="rgba(0,0,0,0.6)">Open 3D view ↗</Chip>
               </Pressable>
             </>

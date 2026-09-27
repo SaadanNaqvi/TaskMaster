@@ -14,7 +14,14 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-os.environ["TASKMASTER_DATA"] = str(BACKEND_ROOT / "data")
+import tempfile
+
+# Must never point at BACKEND_ROOT/"data" — the fixture below does `shutil.rmtree(data_root)` to
+# reset state between runs, and that directory is real local dev data (uploads, job history,
+# library references), not a fixture. A prior version pointed here and a single `pytest` run
+# silently deleted it all, including source media that wasn't recoverable afterward.
+_TEST_DATA_ROOT = Path(tempfile.mkdtemp(prefix="taskmaster_test_data_"))
+os.environ["TASKMASTER_DATA"] = str(_TEST_DATA_ROOT)
 os.environ["TASKMASTER_STUB"] = "1"
 os.environ["TASKMASTER_STUB_DELAY_S"] = "0"
 

@@ -8,12 +8,16 @@ This is a one-time, local data-format conversion — it does not train or fit an
   - weights   : per-vertex joint skinning weights, from `weights` (used for linear blend skinning)
   - joints    : rest-pose joint positions, computed as `J_regressor @ v_template`
   - parents   : the 24-joint kinematic tree (parent index per joint, -1 for the root)
+  - poseDirs  : pose-corrective blend shapes (`posedirs`), but only the 4 columns-blocks for
+                POSE_CORRECTIVE_JOINTS (knees + elbows) — the joints this app's exercises actually
+                bend far enough for plain linear-blend-skinning's "candy-wrapper" collapse at the
+                joint to be visible. The full (V, 3, 207) posedirs covers all 23 non-root joints and
+                would add tens of MB to a mobile bundle for joints (wrists, spine, collars, ...)
+                that never bend enough in an exercise clip to be worth it.
 
-Deliberately NOT included: `shapedirs` / `posedirs` (SMPL's shape and pose-corrective blend
-shapes). Skipping them keeps the exported asset small (~1-2MB instead of tens of MB) and skips a
-chunk of the SMPL math — the tradeoff is the posed dummy mesh won't get SMPL's soft-tissue
-corrections (skin bulging at bent joints, etc.), which is a fine tradeoff for a placeholder overlay
-that will be replaced by a real backend-driven overlay later.
+Deliberately NOT included: `shapedirs` (SMPL's shape blend shapes — no per-user body shape
+personalization yet, so every rendered body uses the mean/rest shape regardless of betas the pose
+pipeline may produce).
 
 Usage:
     cd backend
@@ -43,6 +47,7 @@ need chumpy to actually *do* anything, since we only want the constant arrays it
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import pickle
 import sys
@@ -108,6 +113,15 @@ def load_smpl_pkl(path: Path) -> dict:
         return pickle.load(fh, encoding='latin1')
 
 
+# SMPL joints whose bend visibly distorts under plain linear-blend-skinning with no pose-corrective
+# term: knees and elbows are the only joints a squat (or most exercises this app targets) bends
+# anywhere near their range of motion. Restricting to these 4 (of 23 eligible non-root joints)
+# keeps the exported posedirs slice to ~4/23 of full size — full posedirs would add tens of MB to
+# a mobile bundle (see the module docstring's original size rationale) for joints that never bend
+# far enough in an exercise clip to be worth their weight.
+POSE_CORRECTIVE_JOINTS = [4, 5, 18, 19]  # left_knee, right_knee, left_elbow, right_elbow
+
+
 def convert(input_path: Path, output_path: Path) -> None:
     data = load_smpl_pkl(input_path)
 
@@ -116,6 +130,10 @@ def convert(input_path: Path, output_path: Path) -> None:
     weights = _to_dense(data['weights']).astype(np.float32)  # (N, J)
     j_regressor = _to_dense(data['J_regressor']).astype(np.float32)  # (J, N)
     kintree = np.asarray(data['kintree_table']).astype(np.int64)  # (2, J)
+    # (N, 3, 207): 207 = 23 non-root joints x 9 (flattened 3x3 rotation-minus-identity), in
+    # ascending joint order starting at joint 1 (SMPL's posedirs has no term for the root, since a
+    # global rotation of the whole body has no bend to correct for).
+    posedirs_full = _to_dense(data['posedirs']).astype(np.float32)
 
     joints = j_regressor @ vertices  # (J, 3) rest-pose joint positions
 
@@ -128,6 +146,18 @@ def convert(input_path: Path, output_path: Path) -> None:
     if weights.shape != (vertex_count, joint_count):
         raise ValueError(f'Unexpected weights shape {weights.shape}, expected {(vertex_count, joint_count)}')
 
+    # Slice out just the 9-column block per selected joint (block for joint j starts at column
+    # (j-1)*9, since column 0 belongs to joint 1) and concatenate in POSE_CORRECTIVE_JOINTS order —
+    # frontend/src/lib/smpl/skinning.ts must build its pose-feature vector in this same order.
+    pose_dirs = np.concatenate(
+        [posedirs_full[:, :, (j - 1) * 9:(j - 1) * 9 + 9] for j in POSE_CORRECTIVE_JOINTS], axis=2
+    )  # (N, 3, len(POSE_CORRECTIVE_JOINTS) * 9)
+
+    # JSON numbers cost ~10-15 ASCII bytes each; 6890*3*36 of them as a plain array bloats this to
+    # ~19MB for what's really <3MB of float32 data. Base64-packed bytes cost only 33% overhead
+    # instead of 300-500%, so this field alone drops from ~19MB to ~4MB.
+    pose_dirs_bytes = pose_dirs.astype(np.float32).tobytes()
+
     payload = {
         'vertexCount': vertex_count,
         'jointCount': joint_count,
@@ -136,6 +166,9 @@ def convert(input_path: Path, output_path: Path) -> None:
         'weights': weights.reshape(-1).tolist(),
         'joints': joints.reshape(-1).tolist(),
         'parents': parents,
+        'poseCorrectiveJoints': POSE_CORRECTIVE_JOINTS,
+        'poseDirsShape': list(pose_dirs.shape),
+        'poseDirsBase64': base64.b64encode(pose_dirs_bytes).decode('ascii'),
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

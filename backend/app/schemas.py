@@ -34,6 +34,9 @@ class ReferenceOut(BaseModel):
     source: str
     video_url: str
     thumbnail_url: str
+    # SMPL/ROMP pose sequence for the mobile app's 3D mesh overlay — absent for references that
+    # predate that pipeline or where extraction failed (see extract_smpl_pose's docstring).
+    smpl_pose_url: str | None = None
 
 
 class JobCreated(BaseModel):
@@ -154,6 +157,7 @@ class LibraryEntry(BaseModel):
     thumbnail_url: str | None = None
     pose_path: str | None = None
     video_path: str | None = None
+    smpl_pose_url: str | None = None
     rep: dict[str, Any] | None = None
 
 

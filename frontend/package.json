@@ -5,6 +5,7 @@
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/metro-runtime": "~57.0.16",
+    "base64-js": "^1.5.1",
     "expo": "~57.0.25",
     "expo-asset": "~57.0.18",
     "expo-camera": "~57.0.5",

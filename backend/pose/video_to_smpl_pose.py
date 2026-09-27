@@ -1,28 +1,58 @@
 """
-Convert an exercise video into a per-frame SMPL axis-angle pose sequence using MediaPipe Pose
-landmarks — no GPU, no PyTorch, no detectron2. Runs entirely on CPU in seconds.
+Convert an exercise video into a per-frame SMPL pose sequence using ROMP (Monocular, One-stage
+Regression of Multiple 3D People) — a real learned SMPL regressor, not a geometric approximation.
 
-This is a geometric approximation, not a learned model like HMR2.0/4D-Humans: for each SMPL bone
-we can observe from MediaPipe's 33 landmarks (hip->knee, knee->ankle, shoulder->elbow,
-elbow->wrist, and the overall torso lean), we compute the "swing" rotation that takes the bone's
-rest-pose direction onto the direction MediaPipe observed, hierarchically through the kinematic
-chain so parent rotations are already accounted for. Joints with no direct landmark correspondence
-(collars, feet, wrists' own rotation, neck/head, and the pelvis's own global orientation) are left
-at rest. See the module docstring in frontend/src/lib/smpl/skinning.ts for the equivalent
-TypeScript forward-kinematics used to *render* whatever this script produces — they must agree on
-convention (local axis-angle per joint, applied parent-then-child) since this script's output feeds
-that renderer directly.
+This replaces the previous MediaPipe-landmarks-to-SMPL-swing-angles approach (see git history).
+That approach was a stopgap: MediaPipe only gives 2D-ish joint *positions*, so the amount of SMPL
+pose it could reconstruct was capped at "swing" (the bend visible from joint-to-joint direction) —
+no twist/roll, no shape, no real global orientation, because position data alone can't reveal
+rotation around a bone's own axis. ROMP instead regresses full SMPL parameters (pose, shape, and a
+weak-perspective camera) directly from each RGB frame, so we get real twist and a real body shape,
+not just what MediaPipe's 33 landmarks happen to expose.
 
-Why this over HMR2.0/4D-Humans: that pipeline needs a cloud GPU, detectron2 (painful outside
-Linux+CUDA), and hits a cascade of PyTorch 2.6 checkpoint-compatibility issues. This tradeoff loses
-shape personalization and any twist/roll rotation (position data alone can't reveal roll around a
-bone's own axis), but for a side-on exercise video, the motions that matter for form comparison
-(hip depth, knee flexion, torso lean, elbow bend) are exactly the "swing" bends this script can
-see well, not the twist it can't.
+Why ROMP specifically, over HMR2.0/4D-Humans (which the original script's docstring ruled out):
+ROMP does its own person detection internally, so it needs no detectron2 — the exact dependency
+that made HMR2.0/4D-Humans painful outside Linux+CUDA. It runs on CPU (slow but workable for
+offline batch processing of short clips) via `simple-romp`, a pip-installable package.
 
-Usage:
+One-time environment setup (do this once per machine, not per video):
     cd backend
-    pip install -r pose/requirements.txt
+    python3.11 -m venv .venv-romp   # ROMP's dependency stack targets 3.9-3.11, not 3.12+/3.14
+    source .venv-romp/bin/activate
+    pip install --upgrade setuptools numpy cython lap
+    pip install --no-build-isolation -r pose/requirements-romp.txt
+    # ROMP's own backbone weights auto-download to ~/.romp/ROMP.pkl on first import.
+    # Then convert the *already-licensed* SMPL_NEUTRAL.pkl in pose/models/smpl/ into ROMP's
+    # format (this needs the real `chumpy` package to unpickle, which is unbuildable on modern
+    # Python — see backend/scripts/convert_smpl.py's docstring for why — so declassify it first
+    # with the same stub trick that script uses):
+    python3 - <<'PY'
+    import pickle, sys, types
+    import numpy as np, scipy.sparse
+    class _Ch:
+        def __setstate__(self, s): self.__dict__.update(s if isinstance(s, dict) else {'_raw': s})
+    m = types.ModuleType('chumpy'); m.Ch = _Ch
+    ch = types.ModuleType('chumpy.ch'); ch.Ch = _Ch; m.ch = ch
+    sys.modules['chumpy'], sys.modules['chumpy.ch'] = m, ch
+    def dense(v):
+        if isinstance(v, np.ndarray) or scipy.sparse.issparse(v): return v
+        return v.r if hasattr(v, 'r') else np.asarray(v)
+    with open('pose/models/smpl/SMPL_NEUTRAL.pkl', 'rb') as f:
+        model = pickle.load(f, encoding='latin1')
+    with open('pose/models/smpl/SMPL_NEUTRAL_declassified.pkl', 'wb') as f:
+        pickle.dump({k: dense(v) for k, v in model.items()}, f, protocol=2)
+    PY
+    romp.prepare_smpl -source_dir=pose/models/smpl
+    # (prepare_smpl looks for SMPL_NEUTRAL.pkl specifically — temporarily rename the declassified
+    # file to that name, or point -source_dir at a copy of pose/models/smpl with the swap made.
+    # J_regressor_extra.npy, J_regressor_h36m.npy and smpl_kid_template.npy already live in
+    # pose/models/smpl/ — they're auxiliary regressor matrices from ROMP's own public GitHub
+    # release (github.com/Arthur151/ROMP/releases/download/V2.0/smpl_model_data.zip), not
+    # SMPL-licensed data, so they're safe to keep committed.)
+
+Usage (same as before):
+    cd backend
+    source .venv-romp/bin/activate
     python3 -m pose.video_to_smpl_pose --video path/to/clip.mp4 --out pose_sequence.json
 """
 
@@ -34,194 +64,121 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
+import romp
 
-MODEL_PATH = Path(__file__).parent / 'pose_landmarker_full.task'
-SMPL_ASSET_PATH = Path(__file__).parent.parent.parent / 'frontend' / 'assets' / 'smpl' / 'body_model.json'
+# ROMP's `smpl_thetas` output is already a standard 24-joint SMPL axis-angle pose (joint 0 =
+# global_orient, joints 1-23 = the body), the exact layout frontend/src/lib/smpl/skinning.ts
+# expects — so unlike the old geometric script, no per-joint remapping is needed here at all.
+JOINT_COUNT = 24
 
-# MediaPipe BlazePose's 33-landmark indices (stable since its 2020 release).
-MP_LEFT_SHOULDER, MP_RIGHT_SHOULDER = 11, 12
-MP_LEFT_ELBOW, MP_RIGHT_ELBOW = 13, 14
-MP_LEFT_WRIST, MP_RIGHT_WRIST = 15, 16
-MP_LEFT_HIP, MP_RIGHT_HIP = 23, 24
-MP_LEFT_KNEE, MP_RIGHT_KNEE = 25, 26
-MP_LEFT_ANKLE, MP_RIGHT_ANKLE = 27, 28
-
-# SMPL's standard 24-joint order/parents (must match frontend/scripts/generatePlaceholderBody.js
-# and frontend/src/lib/smpl/poses.ts).
-PARENTS = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19, 20, 21]
-
-# Which SMPL joints we can actually observe, and from which MediaPipe landmark pair.
-# joint -> (smpl_child_joint, mp_parent_landmark, mp_child_landmark)
-# joint 3 (spine1) is special-cased to use the hip-midpoint -> shoulder-midpoint direction instead.
-JOINT_TARGETS: dict[int, tuple[int, int, int]] = {
-    1: (4, MP_LEFT_HIP, MP_LEFT_KNEE),
-    2: (5, MP_RIGHT_HIP, MP_RIGHT_KNEE),
-    4: (7, MP_LEFT_KNEE, MP_LEFT_ANKLE),
-    5: (8, MP_RIGHT_KNEE, MP_RIGHT_ANKLE),
-    16: (18, MP_LEFT_SHOULDER, MP_LEFT_ELBOW),
-    17: (19, MP_RIGHT_SHOULDER, MP_RIGHT_ELBOW),
-    18: (20, MP_LEFT_ELBOW, MP_LEFT_WRIST),
-    19: (21, MP_RIGHT_ELBOW, MP_RIGHT_WRIST),
-}
-SPINE1_JOINT = 3
-SPINE1_CHILD = 6
-
-EMA_ALPHA = 0.5  # landmark smoothing factor; lower = smoother but laggier
+# ROMP predicts global_orient/cam_trans in its own camera-space convention, which renders upside
+# down against our Y-up world: verified empirically on a real clip — global_orient came out as a
+# ~180 rotation about X for a person standing normally facing the camera (i.e. ROMP's "identity"
+# camera-facing orientation IS a 180-about-X flip from our renderer's rest pose), and using
+# cam_trans's y/z directly moved the mesh the wrong way during a squat (deepest-squat frame had a
+# *positive* y instead of dropping below the standing baseline). Both are corrected by the same
+# transform: rotating the whole camera-space frame 180 about X, i.e. negating y and z.
+_FLIP_X_180 = cv2.Rodrigues(np.array([np.pi, 0.0, 0.0]))[0]
 
 
-def load_rest_pose() -> tuple[np.ndarray, list[int]]:
-    if not SMPL_ASSET_PATH.exists():
-        raise FileNotFoundError(
-            f'{SMPL_ASSET_PATH} not found — run the frontend at least once so the committed '
-            'placeholder (or your converted real SMPL) body_model.json exists.'
-        )
-    data = json.loads(SMPL_ASSET_PATH.read_text())
-    joints = np.array(data['joints'], dtype=np.float64).reshape(data['jointCount'], 3)
-    return joints, data['parents']
+def _correct_global_orient(pose_72: np.ndarray) -> np.ndarray:
+    rot_matrix, _ = cv2.Rodrigues(pose_72[:3].astype(np.float64))
+    corrected, _ = cv2.Rodrigues(_FLIP_X_180 @ rot_matrix)
+    out = pose_72.copy()
+    out[:3] = corrected.flatten()
+    return out
 
 
-def rotation_between_vectors(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Axis-angle rotation that takes unit-ish vector a onto unit-ish vector b (shortest arc)."""
-    a = a / (np.linalg.norm(a) + 1e-8)
-    b = b / (np.linalg.norm(b) + 1e-8)
-    dot = float(np.clip(np.dot(a, b), -1.0, 1.0))
-    cross = np.cross(a, b)
-    cross_norm = np.linalg.norm(cross)
-    if cross_norm < 1e-6:
-        if dot > 0:
-            return np.zeros(3)
-        perp = np.array([1.0, 0.0, 0.0]) if abs(a[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
-        axis = np.cross(a, perp)
-        axis = axis / (np.linalg.norm(axis) + 1e-8)
-        return axis * np.pi
-    axis = cross / cross_norm
-    angle = np.arccos(dot)
-    return axis * angle
+def _correct_translation(trans: np.ndarray) -> np.ndarray:
+    return trans * np.array([1.0, -1.0, -1.0], dtype=trans.dtype)
 
 
-def rodrigues(rotvec: np.ndarray) -> np.ndarray:
-    mat, _ = cv2.Rodrigues(rotvec.astype(np.float64))
-    return mat
+def build_romp_model() -> romp.ROMP:
+    settings = romp.main.default_settings
+    settings.GPU = -1  # CPU-only: no CUDA on the dev/demo machine, and this runs offline anyway.
+    settings.show_largest = True  # one person per clip (the user or the reference), side-on.
+    settings.temporal_optimize = True  # built-in OneEuro filter — smooths thetas/betas/cam
+    # across the calls below, since we reuse one instance in frame order. Replaces the old
+    # script's manual EMA-on-landmarks smoothing.
+    settings.calc_smpl = False  # we only need thetas/betas/cam_trans, not verts/joints/mesh —
+    # skipping the SMPL forward pass roughly doubles per-frame throughput on CPU.
+    return romp.ROMP(settings)
 
 
-def landmarks_to_pose(landmarks_xyz: np.ndarray, rest_joints: np.ndarray, parents: list[int]) -> np.ndarray:
-    """landmarks_xyz: (33,3) in MediaPipe's coordinate convention (y-down image space).
-    Returns a flat (72,) axis-angle pose: joint 0 (global_orient) is always zero/fixed — see the
-    module docstring for why."""
-    joint_count = len(parents)
-    local_pose = np.zeros((joint_count, 3), dtype=np.float64)
-    global_rot = [np.eye(3) for _ in range(joint_count)]  # joint 0's parent frame == world == identity
-
-    # Flip y (image-down -> world-up) so bend directions come out the right way round; z is left
-    # as-is since side-on framing makes depth motion minor for the joints we track.
-    pts = landmarks_xyz.copy()
-    pts[:, 1] *= -1
-
-    def solve(joint: int, rest_child: int, observed_dir: np.ndarray) -> None:
-        parent = parents[joint]
-        rest_dir = rest_joints[rest_child] - rest_joints[joint]
-        target_local = global_rot[parent].T @ observed_dir
-        rotvec = rotation_between_vectors(rest_dir, target_local)
-        local_pose[joint] = rotvec
-        global_rot[joint] = global_rot[parent] @ rodrigues(rotvec)
-
-    # Kinematic order matters: parents must be solved (or left at rest, which still needs
-    # global_rot propagated) before children. Joint 0 is fixed at rest by construction.
-    for joint in range(1, joint_count):
-        parent = parents[joint]
-        if joint == SPINE1_JOINT:
-            hip_mid = (pts[MP_LEFT_HIP] + pts[MP_RIGHT_HIP]) / 2
-            shoulder_mid = (pts[MP_LEFT_SHOULDER] + pts[MP_RIGHT_SHOULDER]) / 2
-            solve(joint, SPINE1_CHILD, shoulder_mid - hip_mid)
-        elif joint in JOINT_TARGETS:
-            rest_child, mp_parent, mp_child = JOINT_TARGETS[joint]
-            solve(joint, rest_child, pts[mp_child] - pts[mp_parent])
-        else:
-            # No observation for this joint — leave it at rest, just propagate the parent's frame.
-            global_rot[joint] = global_rot[parent]
-
-    return local_pose.reshape(-1).astype(np.float32)
-
-
-def extract_landmarks(video_path: Path) -> tuple[list[np.ndarray | None], float]:
+def extract_smpl_sequence(
+    video_path: Path,
+) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], float]:
+    """Returns (poses, betas_per_frame, translations, fps). poses/betas/translations are one
+    array per *detected* frame — frames with nobody detected hold the last good values, matching
+    the previous script's dropout handling, so playback never snaps to a T-pose mid-clip."""
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f'Could not open video: {video_path}')
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
 
-    # mediapipe's own docs say GPU delegate support is Ubuntu-only; forcing CPU avoids a native
-    # crash (Metal helper "Service is unavailable") that the default otherwise hits on macOS.
-    base_options = python.BaseOptions(model_asset_path=str(MODEL_PATH), delegate=python.BaseOptions.Delegate.CPU)
-    options = vision.PoseLandmarkerOptions(
-        base_options=base_options,
-        running_mode=vision.RunningMode.VIDEO,
-        num_poses=1,
-        min_pose_detection_confidence=0.5,
-        min_pose_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
+    romp_model = build_romp_model()
 
-    results: list[np.ndarray | None] = []
-    with vision.PoseLandmarker.create_from_options(options) as landmarker:
-        frame_number = 0
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            timestamp_ms = int(frame_number * 1000 / fps)
-            result = landmarker.detect_for_video(mp_image, timestamp_ms)
-            if result.pose_landmarks:
-                lm = result.pose_landmarks[0]
-                results.append(np.array([[p.x, p.y, p.z] for p in lm], dtype=np.float64))
-            else:
-                results.append(None)
-            frame_number += 1
+    poses: list[np.ndarray] = []
+    betas: list[np.ndarray] = []
+    translations: list[np.ndarray] = []
+    detected = 0
+    total = 0
+    while True:
+        ok, frame_bgr = cap.read()
+        if not ok:
+            break
+        total += 1
+        outputs = romp_model(frame_bgr)  # expects BGR, i.e. raw cv2.read() output.
+        if outputs is not None:
+            detected += 1
+            pose = _correct_global_orient(outputs['smpl_thetas'][0].astype(np.float32))
+            poses.append(pose)
+            betas.append(outputs['smpl_betas'][0].astype(np.float32))
+            translations.append(_correct_translation(outputs['cam_trans'][0].astype(np.float32)))
+        elif poses:
+            poses.append(poses[-1])
+            betas.append(betas[-1])
+            translations.append(translations[-1])
+        # else: no detection yet and nothing to hold — drop the frame, matching the old script.
     cap.release()
-    return results, fps
 
-
-def smooth_landmarks(frames: list[np.ndarray | None]) -> list[np.ndarray]:
-    """Exponential moving average across frames; holds the last good value through brief
-    detection dropouts instead of snapping to zero."""
-    smoothed: list[np.ndarray] = []
-    prev: np.ndarray | None = None
-    for lm in frames:
-        if lm is None:
-            if prev is None:
-                continue
-            smoothed.append(prev)
-            continue
-        current = lm if prev is None else EMA_ALPHA * lm + (1 - EMA_ALPHA) * prev
-        smoothed.append(current)
-        prev = current
-    return smoothed
+    print(f'{detected}/{total} frames had a detected person')
+    return poses, betas, translations, fps
 
 
 def convert(video_path: Path, out_path: Path) -> None:
-    rest_joints, parents = load_rest_pose()
-    raw_landmarks, fps = extract_landmarks(video_path)
-    detected = sum(1 for lm in raw_landmarks if lm is not None)
-    print(f'{detected}/{len(raw_landmarks)} frames had a detected person')
+    poses, betas, translations, fps = extract_smpl_sequence(video_path)
+    if not poses:
+        raise RuntimeError(f'No person detected in any frame of {video_path}')
 
-    smoothed = smooth_landmarks(raw_landmarks)
-    poses = [landmarks_to_pose(lm, rest_joints, parents) for lm in smoothed]
+    # A single body shape for the whole clip reads as more stable than 10 shape params wobbling
+    # frame to frame — ROMP regresses betas per-frame independently, so average them out. Not
+    # currently consumed by the renderer (frontend/src/lib/smpl/skinning.ts does plain linear
+    # blend skinning with no shape blend shapes, same scope cut convert_smpl.py already made for
+    # pose-corrective blend shapes) — written here so it's ready once that's added.
+    mean_betas = np.mean(np.stack(betas), axis=0)
+
+    # translations are already axis-corrected (see _correct_translation) — root-relative here
+    # (first frame subtracted) so playback starts near the origin regardless of where the person
+    # stood in frame.
+    trans_arr = np.stack(translations)
+    trans_arr -= trans_arr[0]
 
     payload = {
         'fps': fps,
-        'jointCount': len(parents),
-        'frames': [p.tolist() for p in poses],
+        'jointCount': JOINT_COUNT,
+        'betas': mean_betas.tolist(),
+        'frames': [
+            {'pose': pose.tolist(), 'trans': trans.tolist()}
+            for pose, trans in zip(poses, trans_arr)
+        ],
     }
     out_path.write_text(json.dumps(payload))
     print(f'Wrote {out_path} — {len(poses)} frames')
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--video', required=True, help='Path to the input video')
     parser.add_argument('--out', default='pose_sequence.json', help='Output JSON path')
     args = parser.parse_args()

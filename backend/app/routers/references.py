@@ -36,6 +36,7 @@ def list_references_route(exercise: str = Query(...)):
                 source=ref["source"],
                 video_url=ref.get("video_url") or "/files/library/placeholder.mp4",
                 thumbnail_url=ref.get("thumbnail_url") or "/files/library/placeholder.jpg",
+                smpl_pose_url=ref.get("smpl_pose_url"),
             )
         )
     return out

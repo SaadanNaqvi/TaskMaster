@@ -10,7 +10,8 @@ from app.catalogue import get_exercise
 from app.config import LIBRARY_DIR
 from app.gates import require_exercise
 from app.media import prepare, thumbnail, to_url
-from app.pipeline import stubs
+from app.pipeline.real import extract_smpl_pose
+from app.pipeline.runner import _extract_pose, _find_rep
 from app.storage import add_reference
 
 
@@ -50,15 +51,33 @@ def main() -> None:
 
     prepared = target_dir / "video.mp4"
     prepare(source, prepared)
-    pose = stubs.extract_pose(prepared)
+    # Goes through the runner's stub/real switch (TASKMASTER_STUB) instead of always stubbing, so
+    # a real reference clip actually gets real landmarks when TASKMASTER_STUB=0.
+    pose = _extract_pose(prepared)
 
-    rep = stubs.find_rep(pose, args.exercise)
-    bottom_t = max(0.0, rep.bottom / max(1, len(pose.frames) or 1) * 1.0)
+    rep = _find_rep(pose, args.exercise)
+    # rep.bottom is a frame index — convert with fps, not frame count, to get a timestamp in
+    # seconds (dividing by len(frames) instead of fps previously grabbed a thumbnail from far
+    # earlier in the clip than the actual bottom-of-squat frame).
+    bottom_t = max(0.0, rep.bottom / pose.fps)
     thumb = target_dir / "thumbnail.jpg"
     thumbnail(prepared, bottom_t, thumb)
 
     with open(target_dir / "pose.json", "w", encoding="utf-8") as fh:
         json.dump(pose.model_dump(), fh)
+
+    # Best-effort: the SMPL/ROMP pose sequence that drives the mobile app's 3D mesh overlay. A
+    # separate pipeline from the landmarks above (see extract_smpl_pose's docstring) — skipped for
+    # --seed placeholders (a test-pattern clip has no person to regress a pose from) and never
+    # allowed to fail reference creation, since scoring still works without a 3D overlay.
+    smpl_pose_url = None
+    if not args.seed:
+        smpl_pose_path = target_dir / "smpl_pose.json"
+        try:
+            if extract_smpl_pose(prepared, smpl_pose_path):
+                smpl_pose_url = to_url(smpl_pose_path)
+        except Exception as exc:
+            print(f"warning: SMPL pose extraction failed, continuing without 3D overlay: {exc}")
 
     entry = {
         "id": ref_id,
@@ -70,6 +89,7 @@ def main() -> None:
         "thumbnail_url": to_url(thumb),
         "pose_path": str(target_dir / "pose.json"),
         "video_path": str(prepared),
+        "smpl_pose_url": smpl_pose_url,
         "rep": rep.model_dump() if hasattr(rep, "model_dump") else rep,
     }
     add_reference(entry)

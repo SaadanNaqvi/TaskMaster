@@ -21,10 +21,23 @@ function localRestTransform(asset: SmplAsset, joint: number): THREE.Matrix4 {
   );
 }
 
+const IDENTITY_ROTATION_ROW_MAJOR = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+/** Row-major-flattened (R - I) for one joint's *local* rotation — SMPL's pose-corrective blend
+ * shapes are defined in terms of each joint's own local rotation, not its composed world one. */
+function poseFeatureBlock(rx: number, ry: number, rz: number, out: Float32Array, offset: number): void {
+  const e = new THREE.Matrix4().makeRotationFromQuaternion(axisAngleToQuaternion(rx, ry, rz)).elements;
+  // e is column-major; pick row-major order to match convert_smpl.py's posedirs column layout.
+  const rowMajor = [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
+  for (let k = 0; k < 9; k++) out[offset + k] = rowMajor[k] - IDENTITY_ROTATION_ROW_MAJOR[k];
+}
+
 /**
  * A poser bound to one SMPL asset. Precomputes the rest-pose skeleton once, then turns an
  * axis-angle pose (jointCount*3 numbers, radians) into skinned vertex positions via standard
- * Linear Blend Skinning — no shape/pose-corrective blend shapes (see convert_smpl.py for why).
+ * Linear Blend Skinning, plus pose-corrective blend shapes for whichever joints the asset carries
+ * them for (see convert_smpl.py's POSE_CORRECTIVE_JOINTS — currently knees + elbows only, to fix
+ * the "candy-wrapper" collapse plain LBS produces at a deeply bent knee).
  */
 export class SmplPoser {
   private readonly asset: SmplAsset;
@@ -58,16 +71,43 @@ export class SmplPoser {
     return global;
   }
 
+  /** World-space (mesh-local, pre-group-transform) position of one joint for the given pose —
+   * used to anchor/scale the mesh to a target on-screen position (see lib/smpl/align.ts). */
+  jointWorldPosition(pose: SmplPose, joint: number): THREE.Vector3 {
+    const global = this.globalTransforms(pose);
+    const e = global[joint].elements;
+    return new THREE.Vector3(e[12], e[13], e[14]);
+  }
+
   /** Writes skinned vertex positions for the given pose into `out` (length vertexCount*3). */
   pose(poseVec: SmplPose, out: Float32Array): void {
-    const { vertexCount, jointCount, vertices, weights } = this.asset;
+    const { vertexCount, jointCount, vertices, weights, poseCorrectiveJoints, poseDirs } = this.asset;
     const global = this.globalTransforms(poseVec);
     const skin = global.map((g, j) => g.clone().multiply(this.restGlobalInverse[j]).elements);
 
+    const correctiveCount = poseCorrectiveJoints.length * 9;
+    let poseFeature: Float32Array | null = null;
+    if (correctiveCount > 0) {
+      poseFeature = new Float32Array(correctiveCount);
+      poseCorrectiveJoints.forEach((joint, idx) => {
+        poseFeatureBlock(poseVec[joint * 3], poseVec[joint * 3 + 1], poseVec[joint * 3 + 2], poseFeature!, idx * 9);
+      });
+    }
+
     for (let i = 0; i < vertexCount; i++) {
-      const vx = vertices[i * 3];
-      const vy = vertices[i * 3 + 1];
-      const vz = vertices[i * 3 + 2];
+      let vx = vertices[i * 3];
+      let vy = vertices[i * 3 + 1];
+      let vz = vertices[i * 3 + 2];
+      if (poseFeature) {
+        const base = i * 3 * correctiveCount;
+        for (let k = 0; k < correctiveCount; k++) {
+          const f = poseFeature[k];
+          if (f === 0) continue;
+          vx += poseDirs[base + k] * f;
+          vy += poseDirs[base + correctiveCount + k] * f;
+          vz += poseDirs[base + 2 * correctiveCount + k] * f;
+        }
+      }
       let ox = 0;
       let oy = 0;
       let oz = 0;

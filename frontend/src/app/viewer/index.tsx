@@ -1,32 +1,70 @@
-import React, { useMemo } from 'react';
-import { useRouter } from 'expo-router';
-import { View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { ActivityIndicator, View } from 'react-native';
 import Screen from '../../components/ui/Screen';
 import ScreenHeader from '../../components/ui/ScreenHeader';
 import SmplViewer from '../../components/three/SmplViewer';
 import { SmplPose } from '../../lib/smpl/types';
+import { mediaUrl } from '../../services/apiGateway';
+import { colors } from '../../theme/colors';
 
-// First real pose sequence, produced by backend/pose/video_to_smpl_pose.py from an actual
-// recorded squat — MediaPipe landmarks converted to SMPL axis-angle rotations, no learned model.
+// Fallback demo when opened with no reference (e.g. a bookmark) — an old MediaPipe-geometric pose
+// sequence, kept only so this route always has *something* to show standalone.
 const demoSequenceJson = require('../../../assets/pose-sequences/demo_squat.json');
 
+function parseSequence(json: { fps: number; frames: { pose: number[]; trans: [number, number, number] }[] }) {
+  return {
+    poseSequence: json.frames.map((f) => Float32Array.from(f.pose)) as SmplPose[],
+    translations: json.frames.map((f) => f.trans),
+    fps: json.fps,
+  };
+}
+
 /**
- * Full free-orbit 3D view — one-finger drag to rotate, pinch to zoom. Plays back a real
- * MediaPipe-derived pose sequence instead of the placeholder stand/squat loop.
+ * Full free-orbit 3D view — one-finger drag to rotate, pinch to zoom. Plays the reference's real
+ * ROMP-derived pose sequence when opened from a result (via the smplPoseUrl param), otherwise
+ * falls back to a bundled demo clip.
  */
 export default function ViewerRoute() {
   const router = useRouter();
+  const { smplPoseUrl, referenceName } = useLocalSearchParams<{ smplPoseUrl?: string; referenceName?: string }>();
 
-  const { poseSequence, fps } = useMemo(() => {
-    const frames: SmplPose[] = demoSequenceJson.frames.map((f: number[]) => Float32Array.from(f));
-    return { poseSequence: frames, fps: demoSequenceJson.fps as number };
-  }, []);
+  const demo = useMemo(() => parseSequence(demoSequenceJson), []);
+  const [fetched, setFetched] = useState<ReturnType<typeof parseSequence> | null>(null);
+  const [loading, setLoading] = useState(!!smplPoseUrl);
+
+  useEffect(() => {
+    if (!smplPoseUrl) return;
+    let cancelled = false;
+    setLoading(true);
+    fetch(mediaUrl(smplPoseUrl)!)
+      .then((res) => res.json())
+      .then((json) => {
+        if (!cancelled) setFetched(parseSequence(json));
+      })
+      .catch(() => {
+        // best-effort — falls back to the demo clip below
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [smplPoseUrl]);
+
+  const { poseSequence, translations, fps } = fetched ?? demo;
+  const subtitle = fetched ? `vs ${referenceName ?? 'reference'} · drag to look around` : 'Real squat clip · drag to look around';
 
   return (
     <Screen edges={['top']}>
-      <ScreenHeader onBack={() => router.back()} title="3D View" subtitle="Real squat clip · drag to look around" />
+      <ScreenHeader onBack={() => router.back()} title="3D View" subtitle={subtitle} />
       <View style={{ flex: 1 }}>
-        <SmplViewer poseSequence={poseSequence} fps={fps} />
+        {loading && !fetched ? (
+          <ActivityIndicator color={colors.lime} style={{ marginTop: 40 }} />
+        ) : (
+          <SmplViewer poseSequence={poseSequence} translations={translations} fps={fps} />
+        )}
       </View>
     </Screen>
   );

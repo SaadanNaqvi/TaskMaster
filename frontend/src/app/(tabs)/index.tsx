@@ -14,6 +14,7 @@ import { font } from '../../theme/typography';
 import Skeleton from '../../components/anatomy/Skeleton';
 import { USER_JOINTS } from '../../components/anatomy/joints';
 import { ChevronRight } from '../../components/icons/MiscIcons';
+import { biggestDifference } from '../../utils/angleDeltas';
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -43,6 +44,7 @@ export default function TrainScreen() {
   }, [clips]);
 
   const latest = history[0];
+  const latestDiff = latest ? biggestDifference(latest.result.form_report) : null;
 
   return (
     <Screen edges={['top']}>
@@ -73,10 +75,12 @@ export default function TrainScreen() {
               end={{ x: 1, y: 0 }}
               style={styles.scoreCard}
             >
-              <Text style={styles.scoreValue}>{Math.round(latest.result.form_report.score)}</Text>
+              <Text style={styles.scoreValue}>{latestDiff?.value ?? '—'}</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.scoreTitle}>Last {latest.exerciseName.toLowerCase()} form score</Text>
-                <Text style={styles.scoreSubtitle}>vs {latest.referenceName}</Text>
+                <Text style={styles.scoreTitle}>
+                  {latestDiff ? `${latestDiff.joint} · biggest difference` : 'No joints measured'}
+                </Text>
+                <Text style={styles.scoreSubtitle}>Last {latest.exerciseName.toLowerCase()} vs {latest.referenceName}</Text>
               </View>
               <ChevronRight color={colors.lime} />
             </LinearGradient>
@@ -145,8 +149,7 @@ export default function TrainScreen() {
             keyExtractor={(item) => item.jobId}
             scrollEnabled={false}
             renderItem={({ item }) => {
-              const score = Math.round(item.result.form_report.score);
-              const scoreColor = score >= 75 ? colors.lime : score >= 60 ? colors.amber : colors.red;
+              const diff = biggestDifference(item.result.form_report);
               return (
                 <Pressable style={styles.sessionRow} onPress={() => router.push(`/results/${item.jobId}`)}>
                   <View style={styles.sessionThumb}>
@@ -160,7 +163,7 @@ export default function TrainScreen() {
                       {new Date(item.createdAt).toLocaleDateString(undefined, { weekday: 'short' })}
                     </Text>
                   </View>
-                  <Text style={[styles.sessionScore, { color: scoreColor }]}>{score}</Text>
+                  <Text style={styles.sessionScore}>{diff ? `${diff.joint} ${diff.value}` : '—'}</Text>
                 </Pressable>
               );
             }}
@@ -231,5 +234,5 @@ const styles = StyleSheet.create({
   sessionThumb: { width: 48, height: 48, borderRadius: 12, backgroundColor: colors.s2, overflow: 'hidden' },
   sessionTitle: { color: colors.text, fontSize: 14, fontFamily: font.bold },
   sessionSubtitle: { color: colors.muted, fontSize: 11, fontFamily: font.medium, marginTop: 1 },
-  sessionScore: { fontSize: 17, fontFamily: font.extrabold },
+  sessionScore: { color: colors.text, fontSize: 14, fontFamily: font.extrabold },
 });

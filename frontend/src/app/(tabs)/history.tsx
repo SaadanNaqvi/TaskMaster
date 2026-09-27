@@ -12,6 +12,7 @@ import { USER_JOINTS } from '../../components/anatomy/joints';
 import VideoPlayerModal from '../../components/VideoPlayerModal';
 import { ExerciseClip, clipFileUri, loadClips } from '../../services/clipLibrary';
 import { useAnalysis } from '../../state/AnalysisContext';
+import { biggestDifference } from '../../utils/angleDeltas';
 import { colors } from '../../theme/colors';
 import { font } from '../../theme/typography';
 
@@ -40,8 +41,7 @@ export default function HistoryScreen() {
               <Text style={styles.emptyText}>Sessions you run through the full form check show up here.</Text>
             ) : (
               history.map((item) => {
-                const score = Math.round(item.result.form_report.score);
-                const scoreColor = score >= 75 ? colors.lime : score >= 60 ? colors.amber : colors.red;
+                const diff = biggestDifference(item.result.form_report);
                 return (
                   <Pressable
                     key={item.jobId}
@@ -57,7 +57,7 @@ export default function HistoryScreen() {
                       <Text style={styles.sessionTitle}>{item.exerciseName} vs {item.referenceName}</Text>
                       <Text style={styles.sessionSubtitle}>{new Date(item.createdAt).toLocaleString()}</Text>
                     </View>
-                    <Text style={[styles.sessionScore, { color: scoreColor }]}>{score}</Text>
+                    <Text style={styles.sessionScore}>{diff ? `${diff.joint} ${diff.value}` : '—'}</Text>
                   </Pressable>
                 );
               })
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
   sessionThumb: { width: 44, height: 44, borderRadius: 11, backgroundColor: colors.s2, overflow: 'hidden' },
   sessionTitle: { color: colors.text, fontSize: 13.5, fontFamily: font.bold },
   sessionSubtitle: { color: colors.muted, fontSize: 11, fontFamily: font.medium, marginTop: 1 },
-  sessionScore: { fontSize: 16, fontFamily: font.extrabold },
+  sessionScore: { color: colors.text, fontSize: 14, fontFamily: font.extrabold },
   clipRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, marginTop: 10 },
   clipMain: { flex: 1 },
   clipTitle: { color: colors.text, fontSize: 14, fontFamily: font.bold },

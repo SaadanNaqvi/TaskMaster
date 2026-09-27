@@ -41,17 +41,43 @@ export type ApiJobStatus = {
   created_at: string;
 };
 
-export type ApiFormFlag = {
-  frame: number;
-  joint: string;
-  diff_deg: number;
-  message: string;
+/** One joint's user-minus-reference angle difference in degrees — backend/app/schemas.py::JointDelta.
+ * Positive means the user's angle is larger (e.g. knee straighter); null where it wasn't measurable. */
+export type ApiJointDelta = {
+  delta_at_bottom: number | null;
+  user_at_bottom: number | null;
+  ref_at_bottom: number | null;
+  max_delta: number | null;
+  max_delta_frame: number | null;
+  measured_fraction: number;
+  message: string | null;
 };
 
+export type ApiFrameDelta = {
+  user_frame: number;
+  ref_frame: number;
+  deltas: Record<string, number | null>;
+};
+
+/** backend/app/schemas.py::FormReport — the skeleton angle comparison. No overall score by design. */
 export type ApiFormReport = {
-  score: number;
-  per_joint: Record<string, { max_diff_deg: number; frames_flagged: number[] }>;
-  flags: ApiFormFlag[];
+  user_side: 'left' | 'right';
+  ref_side: 'left' | 'right';
+  bottom_frame: number;
+  /** Ordered by largest |max_delta| first, unmeasurable joints last. */
+  per_joint: Record<string, ApiJointDelta>;
+  frames: ApiFrameDelta[];
+};
+
+/** backend/app/schemas.py::AlignmentFrame — a reference landmark p maps onto the user's video at
+ * anchor + scale * (p - ref_anchor), with its x offset negated first when mirror is set. */
+export type ApiAlignmentFrame = {
+  user_frame: number;
+  ref_frame: number;
+  anchor: [number, number];
+  ref_anchor: [number, number];
+  scale: number;
+  mirror: boolean;
 };
 
 /** One frame of MediaPipe's 33-landmark pose (pixel coords, matching the video it was extracted
@@ -76,7 +102,7 @@ export type ApiJobResult = {
   form_report: ApiFormReport;
   user_pose: ApiPoseSequence;
   ref_pose: ApiPoseSequence;
-  alignment: unknown[];
+  alignment: ApiAlignmentFrame[];
   exercise: string;
 };
 

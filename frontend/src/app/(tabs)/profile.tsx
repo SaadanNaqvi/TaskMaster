@@ -21,7 +21,6 @@ export default function ProfileScreen() {
     }, [])
   );
 
-  const bestScore = Math.round(history.reduce((max, h) => Math.max(max, h.result.form_report.score), 0));
   const exerciseCounts = history.reduce<Record<string, number>>((acc, h) => {
     acc[h.exerciseName] = (acc[h.exerciseName] ?? 0) + 1;
     return acc;
@@ -50,10 +49,6 @@ export default function ProfileScreen() {
           <Card style={styles.statCard}>
             <Text style={styles.statValue}>{clipCount}</Text>
             <Text style={styles.statLabel}>Clips saved</Text>
-          </Card>
-          <Card style={styles.statCard}>
-            <Text style={[styles.statValue, { color: colors.lime }]}>{bestScore || '—'}</Text>
-            <Text style={styles.statLabel}>Best score</Text>
           </Card>
         </View>
 

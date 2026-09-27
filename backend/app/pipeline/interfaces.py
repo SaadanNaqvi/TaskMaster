@@ -21,5 +21,5 @@ def align(user: PoseSequence, ref: PoseSequence, pairs):
     raise NotImplementedError
 
 
-def score(user: PoseSequence, ref: PoseSequence, alignment, exercise: str):
+def score(user: PoseSequence, ref: PoseSequence, alignment, user_rep: RepWindow):
     raise NotImplementedError

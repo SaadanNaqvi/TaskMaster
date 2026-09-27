@@ -88,7 +88,7 @@ Implement every model from the root `CLAUDE.md` "Data contracts" section in `sch
 - `JobStatus` enum: `queued, preparing, extracting, syncing, scoring, done, failed`
 - `ErrorBody {error: {code: str, message: str, details: dict | None}}`
 
-Rules: use `Field` constraints for ranges (`score` 0 to 100, `progress` 0 to 1, landmarks length 33, each landmark length 4). `model_config = ConfigDict(extra="forbid")` on every request model.
+Rules: use `Field` constraints for ranges (`progress` 0 to 1, landmarks length 33, each landmark length 4). `model_config = ConfigDict(extra="forbid")` on every request model.
 
 **Done when:** a test round-trips each model through JSON and rejects a PoseSequence frame with 32 landmarks.
 
@@ -258,13 +258,13 @@ Exact signatures (from root CLAUDE.md):
 ```python
 extract_pose(video_path: Path) -> PoseSequence
 find_rep(pose: PoseSequence, exercise: str) -> RepWindow
-sync(user: PoseSequence, user_rep: RepWindow, ref: PoseSequence, ref_rep: RepWindow) -> list[tuple[float, float]]
-align(user: PoseSequence, ref: PoseSequence, pairs: list[tuple[float, float]]) -> list[AlignmentFrame]
-score(user: PoseSequence, ref: PoseSequence, alignment: list[AlignmentFrame], exercise: str) -> FormReport
+sync(user: PoseSequence, user_rep: RepWindow, ref: PoseSequence, ref_rep: RepWindow) -> list[tuple[int, int]]
+align(user: PoseSequence, ref: PoseSequence, pairs: list[tuple[int, int]]) -> list[AlignmentFrame]
+score(user: PoseSequence, ref: PoseSequence, alignment: list[AlignmentFrame], user_rep: RepWindow) -> FormReport
 ```
 
 ### `pipeline/stubs.py`
-Fake but believable: a side-on skeleton doing one squat (normalised coords), rep window around it, a straight-line time mapping, hip-midpoint anchors, scale 1.0, a form report with 2 or 3 flags. Output must pass schema validation.
+Fake but believable: a side-on skeleton doing one squat and a rep window around it. Output must pass schema validation. Sync/align/score have no stubs: the skeleton angle comparison (`pipeline/angles.py`) always runs for real.
 
 ### `pipeline/runner.py`
 - A module-level `threading.Semaphore(MAX_CONCURRENT_JOBS)`; job stays `queued` until it acquires.
@@ -274,8 +274,8 @@ Fake but believable: a side-on skeleton doing one squat (normalised coords), rep
 | --- | --- | --- |
 | `preparing` | 0.05 | `media.prepare` (real, even in stub mode) |
 | `extracting` | 0.20 | `extract_pose` on user video; load ref pose from library |
-| `syncing` | 0.60 | `find_rep` on user, `sync` with ref's stored rep |
-| `scoring` | 0.80 | `align`, `score` |
+| `syncing` | 0.60 | `find_rep` on user and ref |
+| `scoring` | 0.80 | `sync`, `align`, `score` (angle comparison) |
 | `done` | 1.0 | write `result.json` + `user_pose.json` |
 
 - Wrap the whole job in try/except: on any exception set `failed`, store a short user-safe `error` message, write the traceback to `error.log` in the job dir.

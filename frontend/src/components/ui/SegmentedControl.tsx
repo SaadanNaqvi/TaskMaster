@@ -7,16 +7,24 @@ interface Props {
   options: string[];
   value: string;
   onChange: (value: string) => void;
+  /** Options shown greyed out and not selectable. */
+  disabled?: string[];
 }
 
-export default function SegmentedControl({ options, value, onChange }: Props) {
+export default function SegmentedControl({ options, value, onChange, disabled = [] }: Props) {
   return (
     <View style={styles.track}>
       {options.map((opt) => {
         const active = opt === value;
+        const off = disabled.includes(opt);
         return (
-          <Pressable key={opt} style={[styles.segment, active && styles.segmentActive]} onPress={() => onChange(opt)}>
-            <Text style={[styles.label, active ? styles.labelActive : styles.labelInactive]}>{opt}</Text>
+          <Pressable
+            key={opt}
+            style={[styles.segment, active && styles.segmentActive]}
+            onPress={() => onChange(opt)}
+            disabled={off}
+          >
+            <Text style={[styles.label, active ? styles.labelActive : off ? styles.labelDisabled : styles.labelInactive]}>{opt}</Text>
           </Pressable>
         );
       })}
@@ -36,4 +44,5 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, fontFamily: font.semibold },
   labelActive: { color: colors.text },
   labelInactive: { color: colors.muted },
+  labelDisabled: { color: colors.mutedDim },
 });

@@ -1,0 +1,5 @@
+# Shared reference data and licensed model files — tracked via Git LFS instead of committed
+# as regular blobs, and carved out of the surrounding .gitignore rules so they're still
+# versioned. See README "Reference data & models" for setup.
+backend/data/library/** filter=lfs diff=lfs merge=lfs -text
+backend/pose/models/smpl/*.pkl filter=lfs diff=lfs merge=lfs -text

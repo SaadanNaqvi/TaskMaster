@@ -1,9 +1,16 @@
-data/
+# Local job data is ephemeral/per-machine; the reference library is shared data everyone
+# needs to run the app the same way, so it's the one part tracked in git (via Git LFS).
+data/*
+!data/library/
+!data/library/**
+
 __pycache__/
 *.pyc
 .pytest_cache/
 .env
 frame*.jpg
 
-# SMPL body model files are license-gated (smpl.is.tue.mpg.de) and must not be redistributed.
-pose/models/smpl/*.pkl
+# SMPL body model files (smpl.is.tue.mpg.de) are tracked via Git LFS below. Normally
+# license-gated and not redistributable — only committed here because this repo is private
+# and the team has permission to share internally. See README "Reference data & models"
+# before ever making this repo public.

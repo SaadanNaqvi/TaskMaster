@@ -7,6 +7,8 @@ import ScreenHeader from '../../components/ui/ScreenHeader';
 import Chip from '../../components/ui/Chip';
 import { PlayIcon, ShareIcon } from '../../components/icons/MiscIcons';
 import Smpl3DOverlay, { Smpl3DOverlayHandle } from '../../components/three/Smpl3DOverlay';
+import { SkeletonOverlay, SkeletonSideBySide } from '../../components/skeleton/SkeletonCompare';
+import SegmentedControl from '../../components/ui/SegmentedControl';
 import { ApiJobResult, getJobResult, getJobStatus, getReferences, mediaUrl } from '../../services/apiGateway';
 import { useCatalogue, findExerciseName } from '../../services/catalogue';
 import { useAnalysis } from '../../state/AnalysisContext';
@@ -15,6 +17,9 @@ import { formatDelta, summarizeDifferences } from '../../utils/angleDeltas';
 import { SmplPose } from '../../lib/smpl/types';
 import { colors, radii } from '../../theme/colors';
 import { font } from '../../theme/typography';
+
+type OverlayMode = 'Off' | 'Skeleton' | 'Physical';
+type SkeletonLayout = 'Overlay' | 'Side-by-side';
 
 export default function ResultsRoute() {
   const { jobId } = useLocalSearchParams<{ jobId: string }>();
@@ -81,7 +86,9 @@ export default function ResultsRoute() {
     p.loop = true;
   });
   const [isPlaying, setIsPlaying] = useState(false);
-  const [showOverlay, setShowOverlay] = useState(true);
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>('Skeleton');
+  const [skeletonLayout, setSkeletonLayout] = useState<SkeletonLayout>('Overlay');
+  const scrollRef = useRef<ScrollView>(null);
   const overlayRef = useRef<Smpl3DOverlayHandle>(null);
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
@@ -116,6 +123,16 @@ export default function ResultsRoute() {
       },
     })
   );
+
+  // Jumps the video to a frame (paused) and scrolls back up to it, e.g. to see a joint's biggest difference.
+  const seekToFrame = (frame: number) => {
+    if (!result) return;
+    player.pause();
+    setIsPlaying(false);
+    const target = result.user_pose.frames[frame]?.t ?? frame / result.user_pose.fps;
+    player.seekBy(target - player.currentTime);
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  };
 
   const handleShare = () => {
     if (!result) return;
@@ -158,7 +175,7 @@ export default function ResultsRoute() {
         }
       />
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <View style={styles.videoWrap}>
           {videoUri ? (
             <>
@@ -167,7 +184,7 @@ export default function ResultsRoute() {
                 style={[StyleSheet.absoluteFill, styles.video]}
                 contentFit="cover"
               />
-              {showOverlay && (
+              {overlayMode === 'Physical' && (
                 <View style={styles.overlaySvgWrap} pointerEvents="none">
                   <Smpl3DOverlay
                     ref={overlayRef}
@@ -182,6 +199,9 @@ export default function ResultsRoute() {
                   />
                 </View>
               )}
+              {overlayMode === 'Skeleton' && skeletonLayout === 'Overlay' && (
+                <SkeletonOverlay result={result} player={player} />
+              )}
               <View style={styles.playOverlay} {...videoTouchResponder.panHandlers}>
                 {!isPlaying && (
                   <View style={styles.playBtnBig}>
@@ -189,27 +209,20 @@ export default function ResultsRoute() {
                   </View>
                 )}
               </View>
-              <Pressable style={styles.overlayToggle} onPress={() => setShowOverlay((v) => !v)}>
-                <Chip background="rgba(0,0,0,0.6)" dot={colors.lime}>
-                  {showOverlay
-                    ? refSmplPose
-                      ? `3D overlay · ${referenceName}`
-                      : '3D preview overlay · placeholder'
-                    : 'Overlay hidden'}
-                </Chip>
-              </Pressable>
-              <Pressable
-                style={styles.viewerButton}
-                onPress={() =>
-                  router.push(
-                    refSmplPoseUrl
-                      ? `/viewer?smplPoseUrl=${encodeURIComponent(refSmplPoseUrl)}&referenceName=${encodeURIComponent(referenceName)}`
-                      : '/viewer'
-                  )
-                }
-              >
-                <Chip background="rgba(0,0,0,0.6)">Open 3D view ↗</Chip>
-              </Pressable>
+              {overlayMode === 'Physical' && (
+                <Pressable
+                  style={styles.viewerButton}
+                  onPress={() =>
+                    router.push(
+                      refSmplPoseUrl
+                        ? `/viewer?smplPoseUrl=${encodeURIComponent(refSmplPoseUrl)}&referenceName=${encodeURIComponent(referenceName)}`
+                        : '/viewer'
+                    )
+                  }
+                >
+                  <Chip background="rgba(0,0,0,0.6)">Open 3D view ↗</Chip>
+                </Pressable>
+              )}
             </>
           ) : (
             <View style={[StyleSheet.absoluteFill, styles.videoFallback]}>
@@ -219,11 +232,44 @@ export default function ResultsRoute() {
         </View>
 
         <View style={styles.pad}>
-          <Text style={styles.sectionTitle}>Differences vs {referenceName}</Text>
+          <SegmentedControl
+            options={['Off', 'Skeleton', 'Physical']}
+            value={overlayMode}
+            onChange={(v) => setOverlayMode(v as OverlayMode)}
+            disabled={refSmplPose ? [] : ['Physical']}
+          />
+          {overlayMode === 'Skeleton' && (
+            <>
+              <View style={styles.controlGap} />
+              <SegmentedControl
+                options={['Overlay', 'Side-by-side']}
+                value={skeletonLayout}
+                onChange={(v) => setSkeletonLayout(v as SkeletonLayout)}
+              />
+              {skeletonLayout === 'Side-by-side' && (
+                <View style={styles.sideBySide}>
+                  <SkeletonSideBySide result={result} player={player} />
+                </View>
+              )}
+              <View style={styles.legend}>
+                <View style={[styles.legendDot, { backgroundColor: colors.cyan }]} />
+                <Text style={styles.legendText}>You</Text>
+                <View style={[styles.legendDot, { backgroundColor: colors.muted }]} />
+                <Text style={styles.legendText}>{referenceName}</Text>
+              </View>
+            </>
+          )}
+
+          <Text style={[styles.sectionTitle, styles.sectionGap]}>Differences vs {referenceName}</Text>
           <Text style={styles.sectionSubtitle}>Your joint angle minus the reference&apos;s, in degrees</Text>
 
           {Object.entries(result.form_report.per_joint).map(([name, joint]) => (
-            <View key={name} style={styles.jointRow}>
+            <Pressable
+              key={name}
+              style={styles.jointRow}
+              disabled={joint.max_delta_frame === null}
+              onPress={() => joint.max_delta_frame !== null && seekToFrame(joint.max_delta_frame)}
+            >
               <View style={{ flex: 1 }}>
                 <Text style={styles.jointName}>{formatJointName(name)}</Text>
                 <Text style={styles.jointMessage}>{joint.message ?? 'Not visible enough to measure'}</Text>
@@ -232,9 +278,10 @@ export default function ResultsRoute() {
                 <View style={styles.jointNumbers}>
                   <Text style={styles.jointMax}>{formatDelta(joint.max_delta)}</Text>
                   <Text style={styles.jointBottom}>at bottom {formatDelta(joint.delta_at_bottom)}</Text>
+                  <Text style={styles.jointSeek}>show max ↑</Text>
                 </View>
               )}
-            </View>
+            </Pressable>
           ))}
 
           <Pressable style={styles.formMapLink} onPress={() => router.push('/(tabs)/form-map')}>
@@ -258,7 +305,6 @@ const styles = StyleSheet.create({
   videoWrap: { height: 320, marginHorizontal: 20, borderRadius: radii.xl, overflow: 'hidden', backgroundColor: colors.s1 },
   video: { width: '100%', height: '100%' },
   overlaySvgWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  overlayToggle: { position: 'absolute', left: 12, bottom: 12 },
   viewerButton: { position: 'absolute', right: 12, bottom: 12 },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   playBtnBig: {
@@ -272,7 +318,13 @@ const styles = StyleSheet.create({
   videoFallback: { alignItems: 'center', justifyContent: 'center' },
   videoFallbackText: { color: colors.muted, fontSize: 12.5, fontFamily: font.medium },
   pad: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 40 },
+  controlGap: { height: 8 },
+  sideBySide: { marginTop: 12 },
+  legend: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  legendDot: { width: 8, height: 8, borderRadius: 4, marginLeft: 4 },
+  legendText: { color: colors.muted, fontSize: 11.5, fontFamily: font.medium },
   sectionTitle: { color: colors.text, fontSize: 16, fontFamily: font.bold },
+  sectionGap: { marginTop: 22 },
   sectionSubtitle: { color: colors.muted, fontSize: 11.5, fontFamily: font.medium, marginTop: 3 },
   jointRow: { flexDirection: 'row', gap: 12, marginTop: 14, alignItems: 'flex-start' },
   jointName: { color: colors.text, fontSize: 13.5, fontFamily: font.bold },
@@ -280,6 +332,7 @@ const styles = StyleSheet.create({
   jointNumbers: { alignItems: 'flex-end' },
   jointMax: { color: colors.text, fontSize: 17, fontFamily: font.extrabold },
   jointBottom: { color: colors.muted, fontSize: 11, fontFamily: font.medium, marginTop: 1 },
+  jointSeek: { color: colors.lime, fontSize: 11, fontFamily: font.semibold, marginTop: 2 },
   errorTitle: { color: colors.red, fontSize: 16, fontFamily: font.bold, marginTop: 8 },
   errorBody: { color: colors.muted, fontSize: 13, fontFamily: font.regular, marginTop: 8, lineHeight: 19 },
   formMapLink: { alignItems: 'center', marginTop: 22, paddingVertical: 10 },

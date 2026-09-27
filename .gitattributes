@@ -3,3 +3,4 @@
 # versioned. See README "Reference data & models" for setup.
 backend/data/library/** filter=lfs diff=lfs merge=lfs -text
 backend/pose/models/smpl/*.pkl filter=lfs diff=lfs merge=lfs -text
+frontend/assets/smpl/body_model.json filter=lfs diff=lfs merge=lfs -text

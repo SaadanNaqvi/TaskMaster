@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Required at build time (hard `require()`d by app code) — the repo-root .gitignore's
+# blanket *.json rule would otherwise swallow these as if they were generated data.
+!assets/pose-sequences/*.json
+!assets/smpl/*.json

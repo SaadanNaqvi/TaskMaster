@@ -8,6 +8,7 @@ import { createSmplScene, lerpPose, smoothstep } from '../../lib/smpl/scene';
 import { STANDING_POSE, SQUAT_BOTTOM_POSE } from '../../lib/smpl/poses';
 import { SmplPose } from '../../lib/smpl/types';
 import { coverFitPoint, stableAnklePx } from '../../lib/smpl/align';
+import { AlignDebugger, AlignDebugFrame } from '../../lib/smpl/alignDebug';
 import type { ApiPoseFrame } from '../../services/apiGateway';
 import { colors } from '../../theme/colors';
 
@@ -22,6 +23,8 @@ const CYCLE_MS = 2200;
 // arrive at all (rather than hiding forever), while still being short enough that "wait a bit
 // longer" doesn't itself feel like a stall.
 const ALIGNMENT_TIMEOUT_MS = 1500;
+// Temporary per-frame alignment diagnostics (lib/smpl/alignDebug.ts) — console + on-screen box.
+const ALIGN_DEBUG = __DEV__;
 
 export interface Smpl3DOverlayHandle {
   /** Rotates the mesh around its own vertical axis by `deltaRadians`, relative to its current
@@ -93,6 +96,7 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
   // reports without a device to test against means guessing a third fix isn't productive; this
   // gets real numbers back instead. Remove once a report confirms which value is wrong.
   const [debugText, setDebugText] = useState<string | null>(null);
+  const [alignDebugText, setAlignDebugText] = useState<string | null>(null);
 
   useImperativeHandle(ref, () => ({
     rotateBy: (deltaRadians: number) => {
@@ -117,7 +121,7 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
 
   const onContextCreate = (gl: ExpoWebGLRenderingContext) => {
     startedAt.current = Date.now();
-    const { poser, scene, group, geometry, positions, bounds } = createSmplScene(bodyModelJson, colors.lime, opacity);
+    const { asset, poser, scene, group, geometry, positions, bounds } = createSmplScene(bodyModelJson, colors.lime, opacity);
     groupRef.current = group;
 
     const renderer = new Renderer({ gl, alpha: true });
@@ -144,11 +148,47 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
     const MAX_RELATIVE_MOTION = bounds.height * 0.5;
 
     let screenOffsetResolved = false;
+    // Applied translateX/Y offset, back in drawing-buffer pixels, for the diagnostics below.
+    let offsetPhys = { x: 0, y: 0 };
+
+    const restFeetLocalY = bounds.centerY - bounds.height / 2;
+    const pelvisRest = new THREE.Vector3(asset.joints[0], asset.joints[1], asset.joints[2]);
+    let alignDebugger: AlignDebugger | null = null;
+    let alignDebugSource: SmplPose[] | null = null;
+    let alignDebugSummary: string[] = [];
+    const getAlignDebugger = () => {
+      const { poseSequence, userPoseFrames, userVideoWidth, userVideoHeight } = liveData.current;
+      if (!ALIGN_DEBUG || !poseSequence?.length || !userPoseFrames?.length || !userVideoWidth || !userVideoHeight) return null;
+      if (alignDebugSource !== poseSequence) {
+        alignDebugSource = poseSequence;
+        alignDebugSummary = [];
+        alignDebugger = new AlignDebugger(
+          {
+            camera,
+            group,
+            positions,
+            pelvisRest,
+            restFeetLocalY,
+            groundWorldY,
+            pelvisAboveFeet: pelvisRest.y - restFeetLocalY,
+            referenceDepth,
+            fovRad,
+            maxRelativeMotion: MAX_RELATIVE_MOTION,
+          },
+          userPoseFrames,
+          userVideoWidth,
+          userVideoHeight,
+          poseSequence
+        );
+      }
+      return alignDebugger;
+    };
 
     const updatePose = (viewportW: number, viewportH: number, viewportStable: boolean) => {
       const { poseSequence, translations, fps, userPoseFrames, userVideoWidth, userVideoHeight } = liveData.current;
 
       let pose: SmplPose;
+      let debugFrame: Omit<AlignDebugFrame, 'offsetPhys'> | null = null;
 
       if (poseSequence && poseSequence.length > 0) {
         const player = liveData.current.player;
@@ -158,7 +198,19 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
         pose = poseSequence[refIdx];
         const t = translations?.[refIdx];
         const relativeMotion = new THREE.Vector3((t?.[0] ?? 0) as number, (t?.[1] ?? 0) as number, (t?.[2] ?? 0) as number);
+        const rawTranslation = relativeMotion.clone();
         if (relativeMotion.length() > MAX_RELATIVE_MOTION) relativeMotion.setLength(MAX_RELATIVE_MOTION);
+        if (ALIGN_DEBUG) {
+          debugFrame = {
+            userTime: player?.currentTime ?? 0,
+            userDuration: duration,
+            refIdx,
+            pose,
+            rawTranslation,
+            viewportW,
+            viewportH,
+          };
+        }
 
         if (!screenOffsetResolved) {
           if (viewportStable && userPoseFrames && userPoseFrames.length > 0 && userVideoWidth && userVideoHeight) {
@@ -198,6 +250,7 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
                 resolvedOffset,
               };
               console.log('[Smpl3DOverlay] anchor resolved', debugInfo);
+              offsetPhys = { x: resolvedOffset.x * dpr, y: resolvedOffset.y * dpr };
               setDebugText(
                 `vid ${userVideoWidth}x${userVideoHeight} view ${viewportW.toFixed(0)}x${viewportH.toFixed(0)} dpr${dpr}\n` +
                   `ankleSrc ${ankle.x.toFixed(0)},${ankle.y.toFixed(0)} ankleScr ${ankleOnScreen.x.toFixed(0)},${ankleOnScreen.y.toFixed(0)}\n` +
@@ -235,6 +288,18 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
       poser.pose(pose, positions);
       geometry.attributes.position.needsUpdate = true;
       geometry.computeVertexNormals();
+
+      // Measure only once the anchor is solved, so screen-space errors include the real offset.
+      if (debugFrame && screenOffsetResolved && viewportStable) {
+        const dbg = getAlignDebugger();
+        const lines = dbg?.frame({ ...debugFrame, offsetPhys });
+        if (lines) {
+          // The first returned batch starts with the one-time #1/#2 summary — keep it pinned on top.
+          if (alignDebugSummary.length === 0) alignDebugSummary = lines.filter((l) => l.startsWith('#1') || l.startsWith('#2'));
+          const live = lines.filter((l) => !l.startsWith('#1') && !l.startsWith('#2'));
+          setAlignDebugText([...alignDebugSummary, ...live].join('\n'));
+        }
+      }
     };
 
     let lastPoseUpdate = 0;
@@ -285,9 +350,10 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
       {/* Temporary diagnostic overlay — see debugText above for why. Always visible (unaffected by
        * the mesh's own opacity/transform) so it can be read/screenshotted regardless of whether
        * alignment resolved. Remove alongside debugText once no longer needed. */}
-      {debugText && (
+      {(debugText || alignDebugText) && (
         <View style={styles.debugBox} pointerEvents="none">
-          <Text style={styles.debugText}>{debugText}</Text>
+          {debugText && <Text style={styles.debugText}>{debugText}</Text>}
+          {alignDebugText && <Text style={styles.debugText}>{alignDebugText}</Text>}
         </View>
       )}
     </View>

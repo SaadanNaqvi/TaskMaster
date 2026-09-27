@@ -111,7 +111,6 @@ def run_job(job_id: str):
             result = {
                 "job_id": job_id,
                 "video_url": to_url(prepared_path),
-                "feedback": feedback,
                 "form_report": form_report.model_dump() if hasattr(form_report, "model_dump") else form_report,
                 "user_pose": user_pose.model_dump() if hasattr(user_pose, "model_dump") else user_pose,
                 "ref_pose": ref_pose.model_dump() if hasattr(ref_pose, "model_dump") else ref_pose,

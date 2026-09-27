@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { coverFit, coverFitPoint, PixelPoint, stableAnklePx } from './align';
+import { coverFit, coverFitPoint, PixelPoint, stableAnklePx, stableHipPx } from './align';
 import { SmplPose } from './types';
 
 // Temporary diagnostics for the "overlay rides higher than the person during a squat" report.
@@ -23,23 +23,6 @@ function midpoint(landmarks: (number[] | null)[], a: number, b: number): PixelPo
   const pb = landmarks[b];
   if (!pa || !pb) return null;
   return { x: (pa[0] + pb[0]) / 2, y: (pa[1] + pb[1]) / 2 };
-}
-
-function median(values: number[]): number {
-  const sorted = [...values].sort((x, y) => x - y);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-}
-
-/** Same first-N-detected-frames median as stableAnklePx, but for the hip midpoint. */
-function stableHipPx(frames: { landmarks: (number[] | null)[] }[], windowSize = 10): PixelPoint | null {
-  const samples: PixelPoint[] = [];
-  for (let i = 0; i < frames.length && samples.length < windowSize; i++) {
-    const p = midpoint(frames[i].landmarks, MP_HIP_L, MP_HIP_R);
-    if (p) samples.push(p);
-  }
-  if (samples.length === 0) return null;
-  return { x: median(samples.map((s) => s.x)), y: median(samples.map((s) => s.y)) };
 }
 
 /** Index of the user frame whose timestamp is closest to `t` (frames are sorted by t). */
@@ -101,6 +84,8 @@ export interface AlignDebugFrame {
   viewportH: number;
   /** The screen offset currently applied via translateX/Y, in drawing-buffer (physical) pixels. */
   offsetPhys: PixelPoint;
+  /** Uniform group scale fitted to the user's on-screen leg length (1 = unscaled). */
+  modelScale: number;
 }
 
 export class AlignDebugger {
@@ -131,7 +116,7 @@ export class AlignDebugger {
   }
 
   /** One-time summary for #1 (timing) and #2 (scale). Returns lines for the on-screen box. */
-  summary(userDuration: number, viewportW: number, viewportH: number): string[] {
+  summary(userDuration: number, viewportW: number, viewportH: number, modelScale: number): string[] {
     const lines: string[] = [];
     const n = this.poseSequence.length;
 
@@ -160,15 +145,16 @@ export class AlignDebugger {
     if (ankle && this.standingHip) {
       const { scale } = coverFit(this.userVideoWidth, this.userVideoHeight, viewportW, viewportH);
       const userLegPx = (ankle.y - this.standingHip.y) * scale;
-      const modelLegPx = this.ctx.pelvisAboveFeet * this.pixelsPerWorldUnit(viewportH);
+      const modelLegPx = this.ctx.pelvisAboveFeet * modelScale * this.pixelsPerWorldUnit(viewportH);
       const sizing = {
         userHipToAnklePx: +userLegPx.toFixed(0),
         modelPelvisToFeetPx: +modelLegPx.toFixed(0),
         modelOverUser: +(modelLegPx / userLegPx).toFixed(2),
         coverScale: +scale.toFixed(3),
+        modelScale: +modelScale.toFixed(3),
       };
       console.log('[AlignDebug #2 scale]', sizing);
-      lines.push(`#2 legPx user ${sizing.userHipToAnklePx} model ${sizing.modelPelvisToFeetPx} ratio ${sizing.modelOverUser}`);
+      lines.push(`#2 legPx user ${sizing.userHipToAnklePx} model ${sizing.modelPelvisToFeetPx} ratio ${sizing.modelOverUser} scale ${sizing.modelScale}`);
     } else {
       console.log('[AlignDebug #2 scale] no stable hip/ankle landmarks in user clip');
       lines.push('#2 no stable hip/ankle landmarks');
@@ -187,7 +173,7 @@ export class AlignDebugger {
     const lines: string[] = [];
     if (!this.summaryLogged && f.userDuration > 0) {
       this.summaryLogged = true;
-      lines.push(...this.summary(f.userDuration, f.viewportW, f.viewportH));
+      lines.push(...this.summary(f.userDuration, f.viewportW, f.viewportH, f.modelScale));
     }
 
     camera.updateMatrixWorld();
@@ -199,13 +185,14 @@ export class AlignDebugger {
     const feetLocal = new THREE.Vector3(positions[minIdx * 3], positions[minIdx * 3 + 1], positions[minIdx * 3 + 2]);
     const feetWorld = group.localToWorld(feetLocal.clone());
     // Lift of the feet from skinning alone (pelvis pinned), before translation is added.
-    const feetLiftFromPose = feetLocal.y - this.ctx.restFeetLocalY;
-    // Net: + = floating above the ground the anchor assumed, after translation too.
+    const feetLiftFromPose = (feetLocal.y - this.ctx.restFeetLocalY) * f.modelScale;
+    // Net: + = floating above the ground the anchor assumed, after ground contact is applied.
     const feetErrWorld = feetWorld.y - groundWorldY;
     const feetUpPx = feetErrWorld * ppu;
     this.maxFeetLiftPx = Math.max(this.maxFeetLiftPx, Math.abs(feetUpPx));
 
-    // #4 — raw translation, whether it got clamped, and what it does on screen.
+    // #4 — raw translation and whether it got clamped. Only x is applied now (y comes from ground
+    // contact, z is dropped), so dy is what the raw y *would* have done.
     const raw = f.rawTranslation;
     const clamped = raw.length() > maxRelativeMotion;
     const transDyPx = -raw.y * ppu;

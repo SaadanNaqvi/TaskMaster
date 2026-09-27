@@ -7,7 +7,7 @@ import type { VideoPlayer } from 'expo-video';
 import { createSmplScene, lerpPose, smoothstep } from '../../lib/smpl/scene';
 import { STANDING_POSE, SQUAT_BOTTOM_POSE } from '../../lib/smpl/poses';
 import { SmplPose } from '../../lib/smpl/types';
-import { coverFitPoint, stableAnklePx } from '../../lib/smpl/align';
+import { coverFit, coverFitPoint, stableAnklePx, stableHipPx } from '../../lib/smpl/align';
 import { AlignDebugger, AlignDebugFrame } from '../../lib/smpl/alignDebug';
 import type { ApiPoseFrame } from '../../services/apiGateway';
 import { colors } from '../../theme/colors';
@@ -25,6 +25,10 @@ const CYCLE_MS = 2200;
 const ALIGNMENT_TIMEOUT_MS = 1500;
 // Temporary per-frame alignment diagnostics (lib/smpl/alignDebug.ts) — console + on-screen box.
 const ALIGN_DEBUG = __DEV__;
+// Bounds on the leg-length fit below, so one bad hip/ankle detection can't shrink the model to a
+// speck or blow it up past the frame.
+const MIN_MODEL_SCALE = 0.5;
+const MAX_MODEL_SCALE = 2;
 
 export interface Smpl3DOverlayHandle {
   /** Rotates the mesh around its own vertical axis by `deltaRadians`, relative to its current
@@ -67,9 +71,15 @@ interface Props extends ViewProps {
  * that were hard to diagnose without a device in hand. Plain 2D translation has no camera math to
  * get wrong: whatever pixel offset is computed is exactly the pixel offset applied.
  *
- * The mesh's own motion (from the reference's ROMP-derived translation, root-relative to its own
- * first frame) still plays on top of that fixed screen position in 3D, clamped so a bad per-frame
- * pose-pipeline estimate can't fling it off-screen. Re-solving the screen offset every frame
+ * The model is scaled once, at the same solve, so its standing pelvis-to-feet height matches the
+ * user's on-screen hip-to-ankle height. Its vertical placement is ground contact, re-solved every
+ * pose update: the lowest skinned vertex is put back on the floor, so the feet stay planted and the
+ * hip drop comes from the reference's own knee bend. ROMP's cam_trans y/z is NOT used — it's a
+ * camera-space estimate from the reference video's camera (it moves with the person's bounding-box
+ * center and apparent size, so a squat shows up as ~1 unit of vertical travel and a depth swing),
+ * and applying it raw floated the model above the user when standing and sank it below at the
+ * bottom (verified with lib/smpl/alignDebug.ts on a real clip). Only its x (sideways drift) still
+ * plays, clamped so a bad per-frame pose-pipeline estimate can't fling it off-screen. Re-solving the screen offset every frame
  * instead of once would make the preview visibly chase the user's (often slightly jittery) landmark
  * detections, and would hide any real difference in how far/fast the two move — exactly the signal
  * a form comparison should surface, not erase. The whole preview stays invisible (not just
@@ -148,11 +158,14 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
     const MAX_RELATIVE_MOTION = bounds.height * 0.5;
 
     let screenOffsetResolved = false;
+    // Uniform group scale fitted to the user's leg length at the anchor solve (1 until then).
+    let modelScale = 1;
     // Applied translateX/Y offset, back in drawing-buffer pixels, for the diagnostics below.
     let offsetPhys = { x: 0, y: 0 };
 
     const restFeetLocalY = bounds.centerY - bounds.height / 2;
     const pelvisRest = new THREE.Vector3(asset.joints[0], asset.joints[1], asset.joints[2]);
+    const pelvisAboveFeet = pelvisRest.y - restFeetLocalY;
     let alignDebugger: AlignDebugger | null = null;
     let alignDebugSource: SmplPose[] | null = null;
     let alignDebugSummary: string[] = [];
@@ -170,7 +183,7 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
             pelvisRest,
             restFeetLocalY,
             groundWorldY,
-            pelvisAboveFeet: pelvisRest.y - restFeetLocalY,
+            pelvisAboveFeet,
             referenceDepth,
             fovRad,
             maxRelativeMotion: MAX_RELATIVE_MOTION,
@@ -188,7 +201,7 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
       const { poseSequence, translations, fps, userPoseFrames, userVideoWidth, userVideoHeight } = liveData.current;
 
       let pose: SmplPose;
-      let debugFrame: Omit<AlignDebugFrame, 'offsetPhys'> | null = null;
+      let debugFrame: Omit<AlignDebugFrame, 'offsetPhys' | 'modelScale'> | null = null;
 
       if (poseSequence && poseSequence.length > 0) {
         const player = liveData.current.player;
@@ -197,9 +210,9 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
         const refIdx = Math.min(poseSequence.length - 1, Math.floor(fraction * poseSequence.length));
         pose = poseSequence[refIdx];
         const t = translations?.[refIdx];
-        const relativeMotion = new THREE.Vector3((t?.[0] ?? 0) as number, (t?.[1] ?? 0) as number, (t?.[2] ?? 0) as number);
-        const rawTranslation = relativeMotion.clone();
-        if (relativeMotion.length() > MAX_RELATIVE_MOTION) relativeMotion.setLength(MAX_RELATIVE_MOTION);
+        const rawTranslation = new THREE.Vector3((t?.[0] ?? 0) as number, (t?.[1] ?? 0) as number, (t?.[2] ?? 0) as number);
+        // x only — y is ground contact below, z is dropped (see the component doc comment).
+        const relativeX = THREE.MathUtils.clamp(rawTranslation.x, -MAX_RELATIVE_MOTION, MAX_RELATIVE_MOTION);
         if (ALIGN_DEBUG) {
           debugFrame = {
             userTime: player?.currentTime ?? 0,
@@ -222,6 +235,15 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
               // center of the preview.
               const pixelsPerWorldUnit = viewportH / (2 * referenceDepth * Math.tan(fovRad / 2));
               const groundScreenY = viewportH / 2 - groundWorldY * pixelsPerWorldUnit;
+              // Match the model's standing leg length to the user's on screen, instead of drawing it
+              // at a fixed size (measured ~1.23x too tall on a real clip). Feet stay on the ground
+              // line under any scale, since ground contact below is solved after scaling.
+              const hip = stableHipPx(userPoseFrames);
+              const userLegPx = hip ? (ankle.y - hip.y) * coverFit(userVideoWidth, userVideoHeight, viewportW, viewportH).scale : 0;
+              const modelLegPx = pelvisAboveFeet * pixelsPerWorldUnit;
+              if (userLegPx > 0 && modelLegPx > 0) {
+                modelScale = THREE.MathUtils.clamp(userLegPx / modelLegPx, MIN_MODEL_SCALE, MAX_MODEL_SCALE);
+              }
               screenOffsetResolved = true;
               // viewportW/H (from gl.drawingBufferWidth/Height) are physical pixels — this device
               // renders at 2x, so the canvas backing store is twice the CSS size. RN's translateX/Y
@@ -248,13 +270,14 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
                 referenceDepth,
                 boundsHeight: bounds.height,
                 resolvedOffset,
+                modelScale,
               };
               console.log('[Smpl3DOverlay] anchor resolved', debugInfo);
               offsetPhys = { x: resolvedOffset.x * dpr, y: resolvedOffset.y * dpr };
               setDebugText(
                 `vid ${userVideoWidth}x${userVideoHeight} view ${viewportW.toFixed(0)}x${viewportH.toFixed(0)} dpr${dpr}\n` +
                   `ankleSrc ${ankle.x.toFixed(0)},${ankle.y.toFixed(0)} ankleScr ${ankleOnScreen.x.toFixed(0)},${ankleOnScreen.y.toFixed(0)}\n` +
-                  `groundScr ${groundScreenY.toFixed(0)} offset ${resolvedOffset.x.toFixed(0)},${resolvedOffset.y.toFixed(0)}`
+                  `groundScr ${groundScreenY.toFixed(0)} offset ${resolvedOffset.x.toFixed(0)},${resolvedOffset.y.toFixed(0)} scale ${modelScale.toFixed(2)}`
               );
               setScreenOffset(resolvedOffset);
               setReady(true);
@@ -268,8 +291,8 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
           }
         }
 
-        group.position.copy(defaultPosition).add(relativeMotion);
-        group.scale.setScalar(1);
+        group.position.set(defaultPosition.x + relativeX, 0, defaultPosition.z);
+        group.scale.setScalar(modelScale);
       } else {
         // No pose sequence at all (placeholder loop) — nothing to align to, so show immediately.
         if (!screenOffsetResolved) {
@@ -281,7 +304,7 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
         const t = elapsed < half ? elapsed / half : 1 - (elapsed - half) / half;
         pose = lerpPose(STANDING_POSE, SQUAT_BOTTOM_POSE, smoothstep(t));
         group.scale.setScalar(1);
-        group.position.copy(defaultPosition);
+        group.position.set(defaultPosition.x, 0, defaultPosition.z);
       }
 
       group.rotation.y = extraYRotation.current;
@@ -289,10 +312,17 @@ const Smpl3DOverlay = forwardRef<Smpl3DOverlayHandle, Props>(function Smpl3DOver
       geometry.attributes.position.needsUpdate = true;
       geometry.computeVertexNormals();
 
+      // Ground contact: skinning pins the pelvis, so bent knees lift the feet — put the lowest
+      // vertex (the soles) back on the floor every update. At rest this lands exactly on
+      // defaultPosition.y, which the screen-offset solve above assumes.
+      let lowestY = Infinity;
+      for (let i = 1; i < positions.length; i += 3) if (positions[i] < lowestY) lowestY = positions[i];
+      group.position.y = groundWorldY - lowestY * group.scale.y;
+
       // Measure only once the anchor is solved, so screen-space errors include the real offset.
       if (debugFrame && screenOffsetResolved && viewportStable) {
         const dbg = getAlignDebugger();
-        const lines = dbg?.frame({ ...debugFrame, offsetPhys });
+        const lines = dbg?.frame({ ...debugFrame, offsetPhys, modelScale });
         if (lines) {
           // The first returned batch starts with the one-time #1/#2 summary — keep it pinned on top.
           if (alignDebugSummary.length === 0) alignDebugSummary = lines.filter((l) => l.startsWith('#1') || l.startsWith('#2'));

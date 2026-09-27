@@ -57,8 +57,7 @@ interface Props extends ViewProps {
  * re-solved every frame — so the model's feet line up with theirs instead of sitting dead-center
  * (anchored on feet rather than hip since the feet stay planted for the whole rep, unlike the hip
  * which moves through a squat — anchoring there only lined up at whatever instant it was solved
- * on). This is deliberately
- * NOT a 3D perspective-projection placement: an earlier version solved the 3D world position that
+ * on). This is deliberately NOT a 3D perspective-projection placement: an earlier version solved the 3D world position that
  * would *project* to the right pixel, using the camera's FOV/aspect — mathematically sound, but it
  * went through several rounds of subtle bugs (stale viewport dimensions, projection edge cases)
  * that were hard to diagnose without a device in hand. Plain 2D translation has no camera math to

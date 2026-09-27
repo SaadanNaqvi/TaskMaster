@@ -237,6 +237,11 @@ export default function ResultsRoute() {
             </View>
           </Card>
 
+          <Card style={styles.feedbackCard}>
+            <Text style={styles.feedbackTitle}>Coach feedback</Text>
+            <Text style={styles.feedbackText}>{result.feedback}</Text>
+          </Card>
+
           {sortedFlags.length === 0 ? (
             <Text style={styles.emptyText}>No form issues flagged for this rep.</Text>
           ) : (
@@ -294,6 +299,9 @@ const styles = StyleSheet.create({
   videoFallbackText: { color: colors.muted, fontSize: 12.5, fontFamily: font.medium },
   pad: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 40 },
   scoreCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14 },
+  feedbackCard: { marginTop: 14, padding: 16 },
+  feedbackTitle: { color: colors.text, fontSize: 15, fontFamily: font.bold },
+  feedbackText: { color: colors.muted, fontSize: 13, fontFamily: font.regular, lineHeight: 20, marginTop: 8 },
   scoreTitle: { color: colors.text, fontSize: 15, fontFamily: font.bold },
   scoreSubtitle: { color: colors.muted, fontSize: 11.5, fontFamily: font.medium, marginTop: 3 },
   emptyText: { color: colors.muted, fontSize: 13, fontFamily: font.regular, marginTop: 16, textAlign: 'center' },

@@ -16,6 +16,7 @@ load_dotenv()
 
 import os
 import mimetypes
+import tempfile
 
 import cv2
 
@@ -28,12 +29,12 @@ client = genai.Client(
 )
 
 
-def extract_frames(video_path, num_frames=10, out_dir=None):
+def extract_frames(video, num_frames=10, out_dir=None):
     """
     Samples a fixed number of evenly-spaced frames from a video.
 
     Args:
-        video_path: Path to the overlay-composited video.
+        video: Uploaded video, bytes, or a file-like object.
         num_frames: Number of frames to sample.
         out_dir: Directory to save the extracted JPEGs.
 
@@ -41,108 +42,109 @@ def extract_frames(video_path, num_frames=10, out_dir=None):
         List of file paths to the saved frames.
     """
 
-    cap = cv2.VideoCapture(video_path)
+    if hasattr(video, "file"):
+        video = video.file
+    video_bytes = video.read() if hasattr(video, "read") else video
 
-    if not cap.isOpened():
-        raise ValueError(
-            f"Could not open video: {video_path}"
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as temp_video:
+        temp_video.write(video_bytes)
+        temp_video.flush()
+        video_path = temp_video.name
+
+        cap = cv2.VideoCapture(video_path)
+
+        if not cap.isOpened():
+            raise ValueError(
+                "Could not open uploaded video"
+            )
+
+        total_frames = int(
+            cap.get(cv2.CAP_PROP_FRAME_COUNT)
         )
 
-    total_frames = int(
-        cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    )
+        if total_frames <= 0:
+            cap.release()
+            raise ValueError(
+                "Uploaded video reports 0 frames"
+            )
 
-    if total_frames <= 0:
+        if out_dir is None:
+            out_dir = tempfile.mkdtemp(prefix="video_frames_")
+
+        os.makedirs(out_dir, exist_ok=True)
+
+        num_frames = min(
+            num_frames,
+            total_frames
+        )
+
+        if num_frames == 1:
+            indices = [0]
+        else:
+            step = (
+                (total_frames - 1)
+                / (num_frames - 1)
+            )
+
+            indices = [
+                round(i * step)
+                for i in range(num_frames)
+            ]
+
+        saved_paths = []
+
+        for order, frame_idx in enumerate(indices):
+
+            cap.set(
+                cv2.CAP_PROP_POS_FRAMES,
+                frame_idx
+            )
+
+            ok, frame = cap.read()
+
+            if not ok:
+                continue
+
+            out_path = os.path.join(
+                out_dir,
+                f"frame_{order:03d}.jpg"
+            )
+
+            cv2.imwrite(
+                out_path,
+                frame
+            )
+
+            saved_paths.append(out_path)
+
         cap.release()
-        raise ValueError(
-            f"Video reports 0 frames, is it a valid file? {video_path}"
-        )
 
-    if out_dir is None:
-        base = os.path.splitext(
-            os.path.basename(video_path)
-        )[0]
+        if not saved_paths:
+            raise ValueError(
+                "No frames could be extracted from uploaded video"
+            )
 
-        out_dir = os.path.join(
-            os.path.dirname(video_path) or ".",
-            f"{base}_frames"
-        )
-
-    os.makedirs(out_dir, exist_ok=True)
-
-    num_frames = min(
-        num_frames,
-        total_frames
-    )
-
-    if num_frames == 1:
-        indices = [0]
-    else:
-        step = (
-            (total_frames - 1)
-            / (num_frames - 1)
-        )
-
-        indices = [
-            round(i * step)
-            for i in range(num_frames)
-        ]
-
-    saved_paths = []
-
-    for order, frame_idx in enumerate(indices):
-
-        cap.set(
-            cv2.CAP_PROP_POS_FRAMES,
-            frame_idx
-        )
-
-        ok, frame = cap.read()
-
-        if not ok:
-            continue
-
-        out_path = os.path.join(
-            out_dir,
-            f"frame_{order:03d}.jpg"
-        )
-
-        cv2.imwrite(
-            out_path,
-            frame
-        )
-
-        saved_paths.append(out_path)
-
-    cap.release()
-
-    if not saved_paths:
-        raise ValueError(
-            f"No frames could be extracted from: {video_path}"
-        )
-
-    return saved_paths
+        return saved_paths
 
 
-def get_llm_feedback(video_path: str, exercise_id: str) -> str:
+def get_llm_feedback(video) -> str:
     """
     Sends an overlay-comparison video to Gemini and returns
     written feedback comparing the real athlete against the
     reference athlete.
 
     Args:
-        video_path: Path to the overlay-composited video.
-        exercise_id: Name or ID of the exercise.
+        video: Uploaded video, bytes, or a file-like object.
 
     Returns:
         Gemini's feedback as a string.
     """
 
     # Extract representative frames from the comparison video
-    frames = extract_frames(video_path)
+    frames = extract_frames(video)
 
     prompt_text = f"""
-You are analysing an athlete performing a {exercise_id}.
+You are analysing an athlete performing an exercise.
 
 The video contains:
 
@@ -197,14 +199,11 @@ match the reference.
 
     # Send comparison frames to Gemini
     response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
+        model="gemini-3.8-flash",
         contents=contents,
         config=types.GenerateContentConfig(
-            max_output_tokens=1000,
-            temperature=0.2,
+            temperature=0.2
         ),
     )
 
     return response.text or ""
-
-print(get_llm_feedback("exercise_pose.mp4", "boxing"))

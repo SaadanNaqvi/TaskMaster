@@ -72,6 +72,7 @@ export type ApiPoseSequence = {
 export type ApiJobResult = {
   job_id: string;
   video_url: string;
+  feedback: string;
   form_report: ApiFormReport;
   user_pose: ApiPoseSequence;
   ref_pose: ApiPoseSequence;

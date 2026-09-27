@@ -14,7 +14,6 @@ from .routers.jobs import router as jobs_router
 from .routers.references import router as references_router
 from .storage import load_jobs_on_startup
 
-
 def create_app() -> FastAPI:
     ensure_data_dirs()
     app = FastAPI(title="TaskMaster API", version="0.1.0")
@@ -47,14 +46,6 @@ def create_app() -> FastAPI:
         if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
             raise RuntimeError("ffmpeg and ffprobe must be on PATH")
         load_jobs_on_startup()
-
-    @app.post('/jobs')
-    def processJob(video, exerciseId):
-        
-        # get pkl file for exerciseID in server folders somehow 
-        # combine pkl with video
-        return "path"
-
 
     return app
 

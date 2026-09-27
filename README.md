@@ -14,7 +14,7 @@ The project has two parts:
 This guide gets both running locally on **macOS** or **Windows**. It defaults
 to **stub mode**, which needs no ML setup and works out of the box.
 
-## Prerequisites
+## Prerequisites WARNING: Confirmed working on MAC, try windows at your own discression
 
 - Python 3.11+ and `pip`
 - Node.js 20+ and `npm`
@@ -137,29 +137,79 @@ npx expo login
   every time — especially handy when using `--tunnel` below, since a tunnel
   URL is regenerated each time you restart the dev server.
 
-Point the app at your backend. Edit `frontend/.env.local`:
+### Point the app at your backend
+
+If you're running the app **in a browser on the same machine as the
+backend**, just set `frontend/.env.local` to:
+
+```
+EXPO_PUBLIC_API_BASE_URL=http://localhost:8000
+```
+
+For a **physical phone via Expo Go**, use a **Cloudflare Tunnel** instead of
+a LAN IP — this is the recommended default, not just a fallback. LAN IPs
+break in a bunch of common setups (corporate/campus Wi-Fi client isolation,
+mismatched Windows Firewall profiles, and — critically — **WSL**, where the
+IP `ipconfig`/`hostname -I` gives you is on a private virtual network that
+phones on the same physical Wi-Fi genuinely cannot reach at all, no firewall
+rule fixes it). A tunnel only makes outbound connections, so none of that
+matters — it works identically on macOS, native Windows, and WSL.
+
+Install `cloudflared` once:
+
+```bash
+brew install cloudflared          # macOS
+winget install --id Cloudflare.cloudflared   # Windows (native)
+```
+
+Inside **WSL**, install the Linux build instead (the Windows one above
+doesn't help — WSL needs its own binary, since it's the WSL-side backend
+process, not the Windows host, that needs to expose port 8000):
+
+```bash
+curl -L -o cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb
+```
+
+With the backend already running (see step 1), in another terminal:
+
+```bash
+cloudflared tunnel --url http://localhost:8000
+```
+
+This prints a `https://<random-words>.trycloudflare.com` URL — put that in
+`frontend/.env.local`:
+
+```
+EXPO_PUBLIC_API_BASE_URL=https://<random-words>.trycloudflare.com
+```
+
+> The URL is regenerated every time you restart `cloudflared tunnel --url
+> ...` — same idea as Expo's own `--tunnel` below. Update `.env.local` again
+> whenever you restart it, and restart the Expo dev server (`npx expo start
+> -c`) afterward so it picks up the change — Expo only reads `.env.local` at
+> startup. (A stable URL across restarts is possible with a free Cloudflare
+> account and a named tunnel via `cloudflared tunnel login`/`create`, but
+> that's overkill for local dev — skip it unless you specifically want it.)
+
+If you're confident your phone and computer are on the same, simple,
+unrestricted home Wi-Fi (and **not** using WSL), a plain LAN IP still works
+and is a bit lower-latency:
 
 ```
 EXPO_PUBLIC_API_BASE_URL=http://<your-computer-ip>:8000
 ```
 
-- If you're running the app in a browser on the same machine as the backend,
-  `http://localhost:8000` works.
-- If you're running on a **physical phone via Expo Go**, `localhost` won't
-  reach your computer — use its LAN IP, or expose the backend with a tunnel
-  if your phone isn't on the same Wi-Fi / the network blocks
-  phone-to-computer traffic (e.g. corporate/campus Wi-Fi with client
-  isolation):
-  - macOS: `ipconfig getifaddr en0`
-  - Windows: `ipconfig` → look for "IPv4 Address" under your active adapter
-  - Tunnel (either OS): `cloudflared tunnel --url http://localhost:8000` or
-    `ngrok http 8000`
+- macOS: `ipconfig getifaddr en0`
+- Windows (native, not WSL): `ipconfig` → "IPv4 Address" under your active
+  adapter
 
-Start the dev server with `--tunnel` (same command on both OSes) — this
-routes the connection through a public relay instead of plain LAN, so it
-works even if your phone and computer aren't on the same Wi-Fi or the
-network blocks phone-to-computer traffic (very common on corporate/campus/
-hotel Wi-Fi):
+### Start the dev server
+
+This is a **second, separate tunnel** from the `cloudflared` one above — that
+one exposes the *backend API*; this one exposes the *Expo/Metro dev server*
+(the JS bundle your app runs). You generally want both when testing on a
+physical phone, especially under WSL. Same command on both OSes:
 
 ```bash
 npx expo start --tunnel
@@ -169,10 +219,9 @@ npx expo start --tunnel
 - Scan the printed QR code with your phone's camera → opens in Expo Go.
 - Press `w` in the terminal (or run `npx expo start --web --tunnel`) to open
   a web preview instead.
-- If you're sure phone and computer are on the same, unrestricted Wi-Fi, you
-  can drop `--tunnel` for a slightly faster plain `npx expo start` — but
-  `--tunnel` is the reliable default and what `EXPO_PUBLIC_API_BASE_URL`
-  above assumes if you tunneled the backend too.
+- If you're sure phone and computer are on the same, unrestricted Wi-Fi (and
+  not using WSL), you can drop `--tunnel` for a slightly faster plain `npx
+  expo start` — but `--tunnel` is the reliable default.
 
 More detail on the Expo Go workflow: [`frontend/SETUP.md`](./frontend/SETUP.md).
 

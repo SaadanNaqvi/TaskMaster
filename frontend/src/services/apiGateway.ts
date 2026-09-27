@@ -57,9 +57,14 @@ export type ApiFrameDelta = {
   user_frame: number;
   ref_frame: number;
   deltas: Record<string, number | null>;
+  /** Raw angles behind each delta, for graphing. `ref` is the reference joint on the same side of
+   * the picture as the user's (see backend score()). */
+  user: Record<string, number | null>;
+  ref: Record<string, number | null>;
 };
 
-/** backend/app/schemas.py::FormReport — the skeleton angle comparison. No overall score by design. */
+/** backend/app/schemas.py::FormReport — the skeleton angle comparison. No overall score by design.
+ * Joint keys are 'trunk' plus e.g. 'knee_l' / 'knee_r' (the user's own left and right). */
 export type ApiFormReport = {
   user_side: 'left' | 'right';
   ref_side: 'left' | 'right';

@@ -309,21 +309,23 @@ Response:
     "ref_side": "right",
     "bottom_frame": 42,
     "per_joint": {
-      "knee": {
+      "knee_l": {
         "delta_at_bottom": -11.8,
         "user_at_bottom": 78.2,
         "ref_at_bottom": 90.0,
         "max_delta": -12.4,
         "max_delta_frame": 45,
         "measured_fraction": 0.97,
-        "message": "Knee: 12° more bent than reference"
+        "message": "Knee (left): 12° more bent than reference"
       }
     },
     "frames": [
       {
         "user_frame": 0,
         "ref_frame": 0,
-        "deltas": {"trunk": 1.2, "shoulder": -0.4, "elbow": null, "hip": 2.1, "knee": 0.3, "ankle": -1.0}
+        "deltas": {"trunk": 1.2, "knee_l": 0.3, "knee_r": null, "...": "one entry per joint"},
+        "user": {"trunk": 4.0, "knee_l": 171.3, "knee_r": null, "...": "..."},
+        "ref": {"trunk": 2.8, "knee_l": 171.0, "knee_r": null, "...": "..."}
       }
     ]
   },
@@ -336,8 +338,11 @@ Response:
 }
 ```
 
-`form_report` is the skeleton comparison: 2D joint angles measured on the camera-facing side of each
-body (`user_side` / `ref_side`), synced so both reps hit their bottom together. Every number is a
+`form_report` is the skeleton comparison: 2D joint angles for `trunk` plus `shoulder`, `elbow`, `hip`,
+`knee` and `ankle` on each side (`_l` / `_r`, the user's own left and right), synced so both reps hit
+their bottom together. Sides are paired by camera position: the user's camera-facing side
+(`user_side`) is compared with the reference's camera-facing side (`ref_side`), even when those are
+opposite legs, so a far-side joint is usually unmeasured (`null`) because it's occluded. Every number is a
 signed difference in degrees, user minus reference; positive means the user's angle is larger (knee
 or elbow straighter, hip more open, shoulder more raised, shin more upright, trunk leaning more).
 Trunk is lean from vertical rather than a three-point angle. `null` means the joint wasn't visible
@@ -345,7 +350,7 @@ enough to measure; `measured_fraction` is how much of the rep it was measured ov
 ordered by largest `|max_delta|` first. There is no overall score.
 
 `frames` has one entry per user frame in the rep, paired with the matching reference frame, for
-labelling joints during playback. `alignment` lays the reference skeleton over the user's for
+labelling joints during playback; `user` and `ref` are the raw angles behind each delta, for graphing. `alignment` lays the reference skeleton over the user's for
 display: a reference landmark `p` maps to `anchor + scale * (p - ref_anchor)`, negating the x offset
 first when `mirror` is true.
 

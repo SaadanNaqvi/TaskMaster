@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { LayoutChangeEvent, StyleSheet, View } from 'react-native';
 import Svg, { Circle, G, Line, Text as SvgText } from 'react-native-svg';
 import { VideoPlayer } from 'expo-video';
 import { ApiJobResult } from '../../services/apiGateway';
-import { coverFitPoint } from '../../lib/smpl/align';
 import { Bone, jointPoint, median, Pt, refToUserSpace, skeletonBones } from '../../lib/skeleton/geometry';
+import { useComparisonIndex } from '../../lib/skeleton/playback';
 import { formatDelta } from '../../utils/angleDeltas';
 import { colors } from '../../theme/colors';
 
@@ -16,27 +16,6 @@ const FAR_OPACITY = 0.45;
 interface Props {
   result: ApiJobResult;
   player: VideoPlayer;
-}
-
-/** Index into result.alignment / form_report.frames for the video's current playback position.
- * Polls currentTime once per animation frame (same as Smpl3DOverlay) rather than relying on
- * timeUpdate events, so seeks while paused are picked up too; only re-renders when the index moves. */
-function useComparisonIndex(result: ApiJobResult, player: VideoPlayer): number {
-  const [index, setIndex] = useState(0);
-  useEffect(() => {
-    const count = result.alignment.length;
-    const first = result.alignment[0]?.user_frame ?? 0;
-    const fps = result.user_pose.fps;
-    let raf = 0;
-    const tick = () => {
-      const userFrame = Math.round((player.currentTime ?? 0) * fps);
-      setIndex(Math.min(Math.max(userFrame - first, 0), Math.max(count - 1, 0)));
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [result, player]);
-  return index;
 }
 
 function useSize() {
@@ -86,15 +65,21 @@ function labelsFor(result: ApiJobResult, index: number, map: (p: Pt) => Pt) {
   const labels: { key: string; at: Pt; text: string }[] = [];
   for (const [joint, delta] of Object.entries(frame?.deltas ?? {})) {
     if (delta === null) continue;
-    const at = jointPoint(userFrame, joint, result.form_report.user_side);
+    const at = jointPoint(userFrame, joint);
     if (at) labels.push({ key: joint, at: map(at), text: formatDelta(delta) });
   }
   return labels;
 }
 
-/** Both skeletons drawn over the user's video (which must be shown with contentFit="cover"),
- * the reference laid onto the user via the backend's per-frame alignment. */
-export function SkeletonOverlay({ result, player }: Props) {
+/** Maps a source-video pixel into a dstW x dstH box the way <VideoView contentFit> does. */
+function fitPoint(p: Pt, srcW: number, srcH: number, dstW: number, dstH: number, fit: 'cover' | 'contain'): Pt {
+  const scale = fit === 'cover' ? Math.max(dstW / srcW, dstH / srcH) : Math.min(dstW / srcW, dstH / srcH);
+  return { x: p.x * scale + (dstW - srcW * scale) / 2, y: p.y * scale + (dstH - srcH * scale) / 2 };
+}
+
+/** Both skeletons drawn over the user's video, the reference laid onto the user via the backend's
+ * per-frame alignment. `fit` must match the VideoView's contentFit underneath. */
+export function SkeletonOverlay({ result, player, fit = 'cover' }: Props & { fit?: 'cover' | 'contain' }) {
   const { size, onLayout } = useSize();
   const index = useComparisonIndex(result, player);
   const a = result.alignment[index];
@@ -102,7 +87,7 @@ export function SkeletonOverlay({ result, player }: Props) {
   let content = null;
   if (size && a) {
     const { width: vw, height: vh } = result.user_pose;
-    const toScreen = (p: Pt) => coverFitPoint(p, vw, vh, size.w, size.h);
+    const toScreen = (p: Pt) => fitPoint(p, vw, vh, size.w, size.h, fit);
     const userBones = skeletonBones(result.user_pose.frames[a.user_frame], result.form_report.user_side, toScreen);
     const refBones = skeletonBones(result.ref_pose.frames[a.ref_frame], result.form_report.ref_side, (p) =>
       toScreen(refToUserSpace(p, a))

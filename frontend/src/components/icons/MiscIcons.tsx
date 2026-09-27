@@ -90,3 +90,18 @@ export function CloseIcon({ size = 18, color = '#F2F4F7' }: { size?: number; col
     </Svg>
   );
 }
+
+export function ExpandIcon({ size = 16, color = '#F2F4F7' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16">
+      <Path
+        d="M2 6 V2 H6 M10 2 H14 V6 M14 10 V14 H10 M6 14 H2 V10"
+        stroke={color}
+        strokeWidth={1.8}
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}

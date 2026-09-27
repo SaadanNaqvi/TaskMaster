@@ -5,10 +5,15 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import Screen from '../../components/ui/Screen';
 import ScreenHeader from '../../components/ui/ScreenHeader';
 import Chip from '../../components/ui/Chip';
-import { PlayIcon, ShareIcon } from '../../components/icons/MiscIcons';
+import { ExpandIcon, PlayIcon, ShareIcon } from '../../components/icons/MiscIcons';
 import Smpl3DOverlay, { Smpl3DOverlayHandle } from '../../components/three/Smpl3DOverlay';
 import { SkeletonOverlay, SkeletonSideBySide } from '../../components/skeleton/SkeletonCompare';
 import SegmentedControl from '../../components/ui/SegmentedControl';
+import AngleGraph from '../../components/skeleton/AngleGraph';
+import FrameReadout from '../../components/skeleton/FrameReadout';
+import PlaybackControls from '../../components/video/PlaybackControls';
+import FullscreenAnalysis from '../../components/video/FullscreenAnalysis';
+import { frameTime, seekTo, useIsPlaying } from '../../lib/skeleton/playback';
 import { ApiJobResult, getJobResult, getJobStatus, getReferences, mediaUrl } from '../../services/apiGateway';
 import { useCatalogue, findExerciseName } from '../../services/catalogue';
 import { useAnalysis } from '../../state/AnalysisContext';
@@ -20,6 +25,7 @@ import { font } from '../../theme/typography';
 
 type OverlayMode = 'Off' | 'Skeleton' | 'Physical';
 type SkeletonLayout = 'Overlay' | 'Side-by-side';
+type DetailTab = 'Summary' | 'Graph' | 'This frame';
 
 export default function ResultsRoute() {
   const { jobId } = useLocalSearchParams<{ jobId: string }>();
@@ -85,13 +91,13 @@ export default function ResultsRoute() {
   const player = useVideoPlayer(videoUri ?? null, (p) => {
     p.loop = true;
   });
-  const [isPlaying, setIsPlaying] = useState(false);
+  const isPlaying = useIsPlaying(player);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('Skeleton');
   const [skeletonLayout, setSkeletonLayout] = useState<SkeletonLayout>('Overlay');
+  const [detailTab, setDetailTab] = useState<DetailTab>('Summary');
+  const [fullscreen, setFullscreen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const overlayRef = useRef<Smpl3DOverlayHandle>(null);
-  const isPlayingRef = useRef(isPlaying);
-  isPlayingRef.current = isPlaying;
   const dragLastX = useRef(0);
 
   // Shares one touch target between tap-to-play/pause and drag-to-rotate-the-3D-overlay-while-
@@ -107,19 +113,18 @@ export default function ResultsRoute() {
         dragLastX.current = 0;
       },
       onPanResponderMove: (_evt, gesture) => {
-        if (isPlayingRef.current) return;
+        if (player.playing) return;
         overlayRef.current?.rotateBy((gesture.dx - dragLastX.current) * 0.01);
         dragLastX.current = gesture.dx;
       },
       onPanResponderRelease: (_evt, gesture) => {
         const moved = Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4;
         if (moved) return;
-        if (isPlayingRef.current) {
+        if (player.playing) {
           player.pause();
         } else {
           player.play();
         }
-        setIsPlaying(!isPlayingRef.current);
       },
     })
   );
@@ -127,10 +132,7 @@ export default function ResultsRoute() {
   // Jumps the video to a frame (paused) and scrolls back up to it, e.g. to see a joint's biggest difference.
   const seekToFrame = (frame: number) => {
     if (!result) return;
-    player.pause();
-    setIsPlaying(false);
-    const target = result.user_pose.frames[frame]?.t ?? frame / result.user_pose.fps;
-    player.seekBy(target - player.currentTime);
+    seekTo(player, frameTime(result, frame));
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   };
 
@@ -177,7 +179,11 @@ export default function ResultsRoute() {
 
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <View style={styles.videoWrap}>
-          {videoUri ? (
+          {videoUri && fullscreen ? (
+            <View style={[StyleSheet.absoluteFill, styles.videoFallback]}>
+              <Text style={styles.videoFallbackText}>Playing full screen</Text>
+            </View>
+          ) : videoUri ? (
             <>
               <VideoView
                 player={player}
@@ -209,6 +215,9 @@ export default function ResultsRoute() {
                   </View>
                 )}
               </View>
+              <Pressable style={styles.fullscreenBtn} onPress={() => setFullscreen(true)} hitSlop={8}>
+                <ExpandIcon size={15} />
+              </Pressable>
               {overlayMode === 'Physical' && (
                 <Pressable
                   style={styles.viewerButton}
@@ -232,6 +241,11 @@ export default function ResultsRoute() {
         </View>
 
         <View style={styles.pad}>
+          {videoUri && !fullscreen && (
+            <View style={styles.controls}>
+              <PlaybackControls player={player} result={result} />
+            </View>
+          )}
           <SegmentedControl
             options={['Off', 'Skeleton', 'Physical']}
             value={overlayMode}
@@ -260,35 +274,65 @@ export default function ResultsRoute() {
             </>
           )}
 
-          <Text style={[styles.sectionTitle, styles.sectionGap]}>Differences vs {referenceName}</Text>
-          <Text style={styles.sectionSubtitle}>Your joint angle minus the reference&apos;s, in degrees</Text>
+          <View style={styles.sectionGap}>
+            <SegmentedControl
+              options={['Summary', 'Graph', 'This frame']}
+              value={detailTab}
+              onChange={(v) => setDetailTab(v as DetailTab)}
+            />
+          </View>
 
-          {Object.entries(result.form_report.per_joint).map(([name, joint]) => (
-            <Pressable
-              key={name}
-              style={styles.jointRow}
-              disabled={joint.max_delta_frame === null}
-              onPress={() => joint.max_delta_frame !== null && seekToFrame(joint.max_delta_frame)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.jointName}>{formatJointName(name)}</Text>
-                <Text style={styles.jointMessage}>{joint.message ?? 'Not visible enough to measure'}</Text>
-              </View>
-              {joint.max_delta !== null && (
-                <View style={styles.jointNumbers}>
-                  <Text style={styles.jointMax}>{formatDelta(joint.max_delta)}</Text>
-                  <Text style={styles.jointBottom}>at bottom {formatDelta(joint.delta_at_bottom)}</Text>
-                  <Text style={styles.jointSeek}>show max ↑</Text>
-                </View>
-              )}
-            </Pressable>
-          ))}
+          {detailTab === 'Summary' && (
+            <>
+              <Text style={[styles.sectionTitle, styles.tabGap]}>Differences vs {referenceName}</Text>
+              <Text style={styles.sectionSubtitle}>Your joint angle minus the reference&apos;s, in degrees</Text>
+
+              {Object.entries(result.form_report.per_joint).map(([name, joint]) => (
+                <Pressable
+                  key={name}
+                  style={styles.jointRow}
+                  disabled={joint.max_delta_frame === null}
+                  onPress={() => joint.max_delta_frame !== null && seekToFrame(joint.max_delta_frame)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.jointName}>{formatJointName(name)}</Text>
+                    <Text style={styles.jointMessage}>{joint.message ?? 'Not visible enough to measure'}</Text>
+                  </View>
+                  {joint.max_delta !== null && (
+                    <View style={styles.jointNumbers}>
+                      <Text style={styles.jointMax}>{formatDelta(joint.max_delta)}</Text>
+                      <Text style={styles.jointBottom}>at bottom {formatDelta(joint.delta_at_bottom)}</Text>
+                      <Text style={styles.jointSeek}>show max ↑</Text>
+                    </View>
+                  )}
+                </Pressable>
+              ))}
+            </>
+          )}
+          {detailTab === 'Graph' && (
+            <View style={styles.tabGap}>
+              <AngleGraph result={result} player={player} />
+            </View>
+          )}
+          {detailTab === 'This frame' && (
+            <View style={styles.tabGap}>
+              <FrameReadout result={result} player={player} />
+            </View>
+          )}
 
           <Pressable style={styles.formMapLink} onPress={() => router.push('/(tabs)/form-map')}>
             <Text style={styles.formMapLinkText}>View full Form Map →</Text>
           </Pressable>
         </View>
       </ScrollView>
+
+      <FullscreenAnalysis
+        visible={fullscreen}
+        onClose={() => setFullscreen(false)}
+        player={player}
+        result={result}
+        showSkeleton={overlayMode === 'Skeleton'}
+      />
     </Screen>
   );
 }
@@ -306,6 +350,19 @@ const styles = StyleSheet.create({
   video: { width: '100%', height: '100%' },
   overlaySvgWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   viewerButton: { position: 'absolute', right: 12, bottom: 12 },
+  fullscreenBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  controls: { marginBottom: 14 },
+  tabGap: { marginTop: 14 },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   playBtnBig: {
     width: 56,

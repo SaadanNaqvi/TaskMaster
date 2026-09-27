@@ -127,16 +127,8 @@ def sync(user: PoseSequence, user_rep: RepWindow, ref: PoseSequence, ref_rep: Re
     return pairs
 
 
-def _mid(frame, a: int, b: int) -> tuple[float, float] | None:
-    """Midpoint of two landmarks, or whichever one is visible, or None."""
-    pts = [lm for lm in (frame.landmarks[a], frame.landmarks[b]) if lm is not None and lm[3] >= angles.MIN_VISIBILITY]
-    if not pts:
-        return None
-    return sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
-
-
 def _torso(frame) -> float | None:
-    hip, shoulder = _mid(frame, 23, 24), _mid(frame, 11, 12)
+    hip, shoulder = angles.midpoint(frame, 23, 24), angles.midpoint(frame, 11, 12)
     if hip is None or shoulder is None:
         return None
     return math.hypot(shoulder[0] - hip[0], shoulder[1] - hip[1]) or None
@@ -159,8 +151,8 @@ def align(user: PoseSequence, ref: PoseSequence, pairs) -> list[AlignmentFrame]:
     ref_hip = (ref.width / 2, ref.height / 2)
     out = []
     for i, j in pairs:
-        user_hip = _mid(user.frames[i], 23, 24) or user_hip
-        ref_hip = _mid(ref.frames[j], 23, 24) or ref_hip
+        user_hip = angles.midpoint(user.frames[i], 23, 24) or user_hip
+        ref_hip = angles.midpoint(ref.frames[j], 23, 24) or ref_hip
         out.append(
             AlignmentFrame(
                 user_frame=i,
@@ -178,8 +170,14 @@ def score(user: PoseSequence, ref: PoseSequence, alignment: list[AlignmentFrame]
     """Signed user-minus-reference joint angle differences over the synced rep — per frame, at the
     bottom, and the largest. No overall score by design: the output is the degrees themselves."""
     user_side, ref_side = angles.camera_side(user), angles.camera_side(ref)
-    user_angles = angles.angle_series(user, user_side)
-    ref_angles = angles.angle_series(ref, ref_side)
+    user_angles = angles.angle_series(user)
+    raw_ref_angles = angles.angle_series(ref)
+    # Pair sides by camera position, not anatomy: the user's near-side knee against the reference's
+    # near-side knee, even if that's the reference's other leg. Otherwise a user filming their left
+    # side against a reference filmed from the right would compare visible joints against occluded
+    # ones and measure almost nothing. Keys stay in the user's own left/right.
+    swap = user_side != ref_side
+    ref_angles = {joint: raw_ref_angles[angles.opposite_side(joint) if swap else joint] for joint in angles.JOINTS}
 
     def diff(joint: str, i: int, j: int) -> float | None:
         u, r = user_angles[joint][i], ref_angles[joint][j]
@@ -193,6 +191,8 @@ def score(user: PoseSequence, ref: PoseSequence, alignment: list[AlignmentFrame]
                 joint: None if (d := diff(joint, a.user_frame, a.ref_frame)) is None else round(d, 1)
                 for joint in angles.JOINTS
             },
+            user={joint: _round(user_angles[joint][a.user_frame]) for joint in angles.JOINTS},
+            ref={joint: _round(ref_angles[joint][a.ref_frame]) for joint in angles.JOINTS},
         )
         for a in alignment
     ]

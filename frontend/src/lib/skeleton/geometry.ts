@@ -60,15 +60,24 @@ export function skeletonBones(frame: ApiPoseFrame | undefined, cameraSide: Side,
   return bones;
 }
 
-/** Where a joint's delta label is pinned — trunk lean sits mid-torso rather than on a joint. */
-export function jointPoint(frame: ApiPoseFrame | undefined, joint: string, side: Side): Pt | null {
+function midpoint(frame: ApiPoseFrame | undefined, a: number, b: number): Pt | null {
+  const pts = [landmark(frame, a), landmark(frame, b)].filter((p): p is Pt => p !== null);
+  if (pts.length === 0) return null;
+  return { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
+}
+
+/** Where a joint's delta label is pinned, for joint keys like 'knee_l' / 'knee_r' — trunk lean sits
+ * mid-torso rather than on a joint. */
+export function jointPoint(frame: ApiPoseFrame | undefined, joint: string): Pt | null {
   if (joint === 'trunk') {
-    const s = landmark(frame, sideIndex(11, side));
-    const h = landmark(frame, sideIndex(23, side));
+    const s = midpoint(frame, 11, 12);
+    const h = midpoint(frame, 23, 24);
     return s && h ? { x: (s.x + h.x) / 2, y: (s.y + h.y) / 2 } : null;
   }
-  const i = LEFT_JOINT_LANDMARK[joint];
-  return i === undefined ? null : landmark(frame, sideIndex(i, side));
+  const [name, suffix] = joint.split('_');
+  const i = LEFT_JOINT_LANDMARK[name];
+  if (i === undefined || (suffix !== 'l' && suffix !== 'r')) return null;
+  return landmark(frame, sideIndex(i, suffix === 'l' ? 'left' : 'right'));
 }
 
 /** Maps a reference-video pixel into the user video's pixel space so the reference skeleton lays

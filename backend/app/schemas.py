@@ -151,6 +151,10 @@ class FrameDelta(BaseModel):
     user_frame: int = Field(..., ge=0)
     ref_frame: int = Field(..., ge=0)
     deltas: dict[str, float | None]
+    # The raw angles behind each delta, for plotting user vs reference over the rep. Keyed by the
+    # user's sides; `ref` holds the reference joint on the same side of the picture (see score()).
+    user: dict[str, float | None]
+    ref: dict[str, float | None]
 
 
 class FormReport(BaseModel):

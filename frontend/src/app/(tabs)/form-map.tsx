@@ -31,7 +31,16 @@ export default function FormMapScreen() {
   const { lastJob } = useAnalysis();
 
   const perJoint = lastJob ? Object.entries(lastJob.result.form_report.per_joint) : [];
-  const measured = lastJob ? measuredJoints(lastJob.result.form_report) : [];
+  // The figure is one static silhouette, so left and right of a joint share a point — stack them
+  // as "L −12°" / "R +3°" lines there instead of drawing one number over the other.
+  const labels = new Map<string, { at: Point; lines: string[] }>();
+  for (const [name, dev] of lastJob ? measuredJoints(lastJob.result.form_report) : []) {
+    const [base, side] = name.split('_');
+    const entry = labels.get(base) ?? { at: jointPoint(base), lines: [] };
+    entry.lines.push(`${side ? `${side.toUpperCase()} ` : ''}${formatDelta(dev.max_delta)}`);
+    entry.lines.sort();
+    labels.set(base, entry);
+  }
 
   return (
     <Screen edges={['top']}>
@@ -54,17 +63,16 @@ export default function FormMapScreen() {
             <Svg viewBox="70 110 230 350" width="100%" height={280}>
               <LifterSilhouette joints={USER_JOINTS} fill="#1E232A" />
               <Skeleton joints={USER_JOINTS} color={colors.mutedDim} strokeWidth={3} glow={false} />
-              {measured.map(([name, dev]) => {
-                const [x, y] = jointPoint(name);
-                return (
-                  <React.Fragment key={name}>
-                    <Circle cx={x} cy={y} r={6} fill={colors.text} stroke={colors.bg} strokeWidth={2} />
-                    <SvgText x={x + 12} y={y + 5} fill={colors.text} fontSize={15} fontWeight="bold">
-                      {formatDelta(dev.max_delta)}
+              {[...labels].map(([base, { at: [x, y], lines }]) => (
+                <React.Fragment key={base}>
+                  <Circle cx={x} cy={y} r={6} fill={colors.text} stroke={colors.bg} strokeWidth={2} />
+                  {lines.map((line, i) => (
+                    <SvgText key={line} x={x + 12} y={y + 5 + (i - (lines.length - 1) / 2) * 15} fill={colors.text} fontSize={13} fontWeight="bold">
+                      {line}
                     </SvgText>
-                  </React.Fragment>
-                );
-              })}
+                  ))}
+                </React.Fragment>
+              ))}
             </Svg>
           </Card>
 

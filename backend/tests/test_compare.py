@@ -55,21 +55,39 @@ def test_trunk_lean():
 
 
 def test_joint_angles_from_figure():
-    a = angles.joint_angles(_figure(knee_deg=100), "left")
-    assert a["knee"] == pytest.approx(100)
-    assert a["hip"] == pytest.approx(180)
-    assert a["elbow"] == pytest.approx(90)
+    a = angles.joint_angles(_figure(knee_deg=100))
+    assert a["knee_l"] == pytest.approx(100)
+    assert a["hip_l"] == pytest.approx(180)
+    assert a["elbow_l"] == pytest.approx(90)
     assert a["trunk"] == pytest.approx(0)
+    # The far (right) side is barely visible in _figure, so it goes unmeasured rather than guessed.
+    assert a["knee_r"] is None
+
+
+def test_both_sides_measured_when_visible():
+    frame = _figure(knee_deg=100)
+    for i in range(12, 33, 2):
+        frame.landmarks[i][3] = 0.9
+    a = angles.joint_angles(frame)
+    assert a["knee_l"] == pytest.approx(100)
+    assert a["knee_r"] == pytest.approx(100)
+
+
+def test_joints_list_both_sides():
+    assert angles.JOINTS[0] == "trunk"
+    assert {"knee_l", "knee_r", "shoulder_l", "shoulder_r"} <= set(angles.JOINTS)
+    assert angles.opposite_side("knee_l") == "knee_r"
+    assert angles.opposite_side("trunk") == "trunk"
 
 
 def test_low_visibility_is_not_measured():
     frame = _figure()
     frame.landmarks[25] = [300.0, 350.0, 0.0, 0.2]
-    a = angles.joint_angles(frame, "left")
-    assert a["knee"] is None and a["hip"] is None
+    a = angles.joint_angles(frame)
+    assert a["knee_l"] is None and a["hip_l"] is None
     assert a["trunk"] is not None
     frame.landmarks[23] = None
-    assert angles.joint_angles(frame, "left")["trunk"] is None
+    assert angles.joint_angles(frame)["trunk"] is None
 
 
 def test_camera_side_and_facing():
@@ -86,9 +104,9 @@ def test_smooth_keeps_gaps():
 
 
 def test_describe():
-    assert angles.describe("knee", -12.4) == "Knee: 12° more bent than reference"
+    assert angles.describe("knee_l", -12.4) == "Knee (left): 12° more bent than reference"
     assert angles.describe("trunk", 8) == "Trunk: 8° leaning more than reference"
-    assert angles.describe("hip", 0.4) == "Hip: matches reference"
+    assert angles.describe("hip_r", 0.4) == "Hip (right): matches reference"
 
 
 def test_sync_lines_up_rep_phases():
@@ -119,16 +137,20 @@ def test_score_reports_signed_knee_delta():
     report = real.score(user, ref, alignment, user_rep)
 
     assert report.user_side == "left" and report.ref_side == "right"
-    assert next(iter(report.per_joint)) == "knee"
-    knee = report.per_joint["knee"]
+    # User films their left, reference their right: still compared, near side to near side.
+    assert next(iter(report.per_joint)) == "knee_l"
+    knee = report.per_joint["knee_l"]
     assert knee.delta_at_bottom == pytest.approx(-30)
     assert knee.max_delta == pytest.approx(-30)
     assert knee.user_at_bottom == pytest.approx(90)
     assert knee.ref_at_bottom == pytest.approx(120)
     assert knee.measured_fraction == 1.0
-    assert knee.message == "Knee: 30° more bent than reference"
+    assert knee.message == "Knee (left): 30° more bent than reference"
+    assert report.per_joint["knee_r"].max_delta is None
     assert len(report.frames) == 5
-    assert all(f.deltas["knee"] == pytest.approx(-30) for f in report.frames)
+    assert all(f.deltas["knee_l"] == pytest.approx(-30) for f in report.frames)
+    assert report.frames[0].user["knee_l"] == pytest.approx(90)
+    assert report.frames[0].ref["knee_l"] == pytest.approx(120)
 
 
 def test_score_with_no_person_detected():

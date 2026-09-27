@@ -1,9 +1,9 @@
 """2D joint angles over MediaPipe's 33-landmark PoseSequence (pixel coords, see
 pose/extract_pose_sequence.py). Pure Python so it runs in the main FastAPI env without mediapipe.
 
-Angles are measured on one side of the body only — the side facing the camera. The user films
-side-on (RecordScreen's framing guide), so the far side is mostly occluded and MediaPipe's guess for
-it is noise in 2D.
+Every limb joint is measured on both sides of the body (`knee_l`, `knee_r`, ...). The user films
+side-on, so the side facing away from the camera is often occluded — its landmarks then fall below
+MIN_VISIBILITY and that side simply goes unmeasured for those frames rather than reporting noise.
 """
 from __future__ import annotations
 
@@ -26,11 +26,11 @@ _LEFT_JOINTS: dict[str, tuple[int, int, int]] = {
     "knee": (23, 25, 27),  # hip, knee, ankle
     "ankle": (25, 27, 31),  # knee, ankle, foot index
 }
-_TRUNK_LEFT = (11, 23)  # shoulder, hip
 _HEEL_TOE_LEFT = (29, 31)
 
-# Order the joints are reported in, top of the body down.
-JOINTS: tuple[str, ...] = ("trunk", "shoulder", "elbow", "hip", "knee", "ankle")
+# Order the joints are reported in, top of the body down. Limb joints carry a side suffix; trunk
+# lean is one value for the whole torso.
+JOINTS: tuple[str, ...] = ("trunk",) + tuple(f"{name}_{s}" for name in _LEFT_JOINTS for s in ("l", "r"))
 
 
 def _idx(i: int, side: Side) -> int:
@@ -42,6 +42,14 @@ def _point(frame: PoseFrame, i: int) -> tuple[float, float] | None:
     if lm is None or lm[3] < MIN_VISIBILITY:
         return None
     return lm[0], lm[1]
+
+
+def midpoint(frame: PoseFrame, a: int, b: int) -> tuple[float, float] | None:
+    """Midpoint of two landmarks, or whichever one is visible, or None."""
+    pts = [p for p in (_point(frame, a), _point(frame, b)) if p]
+    if not pts:
+        return None
+    return sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
 
 
 def angle_at(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float | None:
@@ -65,14 +73,15 @@ def trunk_lean(shoulder: tuple[float, float], hip: tuple[float, float]) -> float
     return math.degrees(math.atan2(abs(dx), dy))
 
 
-def joint_angles(frame: PoseFrame, side: Side) -> dict[str, float | None]:
+def joint_angles(frame: PoseFrame) -> dict[str, float | None]:
     out: dict[str, float | None] = {}
-    s = _point(frame, _idx(_TRUNK_LEFT[0], side))
-    h = _point(frame, _idx(_TRUNK_LEFT[1], side))
+    s = midpoint(frame, 11, 12)
+    h = midpoint(frame, 23, 24)
     out["trunk"] = trunk_lean(s, h) if s and h else None
     for name, (a, b, c) in _LEFT_JOINTS.items():
-        pa, pb, pc = (_point(frame, _idx(i, side)) for i in (a, b, c))
-        out[name] = angle_at(pa, pb, pc) if pa and pb and pc else None
+        for side in ("left", "right"):
+            pa, pb, pc = (_point(frame, _idx(i, side)) for i in (a, b, c))
+            out[f"{name}_{side[0]}"] = angle_at(pa, pb, pc) if pa and pb and pc else None
     return out
 
 
@@ -113,9 +122,15 @@ def smooth(values: Sequence[float | None], window: int = 5) -> list[float | None
     return out
 
 
-def angle_series(pose: PoseSequence, side: Side) -> dict[str, list[float | None]]:
+def opposite_side(joint: str) -> str:
+    """knee_l <-> knee_r; unsided joints (trunk) map to themselves."""
+    name, _, side = joint.partition("_")
+    return {"l": f"{name}_r", "r": f"{name}_l"}.get(side, joint)
+
+
+def angle_series(pose: PoseSequence) -> dict[str, list[float | None]]:
     """Smoothed per-frame angles for every joint in JOINTS."""
-    raw = [joint_angles(frame, side) for frame in pose.frames]
+    raw = [joint_angles(frame) for frame in pose.frames]
     return {name: smooth([a[name] for a in raw]) for name in JOINTS}
 
 
@@ -131,10 +146,11 @@ _WORDS: dict[str, tuple[str, str]] = {
 
 
 def describe(joint: str, delta: float) -> str:
-    """Plain-language reading of a signed user-minus-reference delta, e.g. 'Knee: 12° more bent
-    than reference'."""
-    label = joint.capitalize()
+    """Plain-language reading of a signed user-minus-reference delta, e.g. 'Knee (left): 12° more
+    bent than reference'."""
+    name, _, side = joint.partition("_")
+    label = name.capitalize() + {"l": " (left)", "r": " (right)"}.get(side, "")
     if abs(delta) < 1:
         return f"{label}: matches reference"
-    larger, smaller = _WORDS[joint]
+    larger, smaller = _WORDS[name]
     return f"{label}: {abs(delta):.0f}° {larger if delta > 0 else smaller} than reference"

@@ -173,6 +173,7 @@ class JobResult(BaseModel):
 
     job_id: str
     video_url: str
+    feedback: str
     form_report: FormReport
     user_pose: PoseSequence
     ref_pose: PoseSequence

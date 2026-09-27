@@ -77,6 +77,24 @@ cd frontend
 npm install
 ```
 
+### Sign in to Expo (recommended)
+
+Create a free account at [expo.dev](https://expo.dev) if you don't have one,
+then sign in on **both** the CLI and the Expo Go app on your phone with the
+same account:
+
+```bash
+npx expo login
+```
+
+- On the phone, open Expo Go → **Profile** tab → sign in with the same
+  account.
+- Being signed in on both sides isn't strictly required to run the project,
+  but it means your dev server shows up under "Recently in development" in
+  Expo Go so you can reopen it with one tap instead of rescanning the QR code
+  every time — especially handy when using `--tunnel` below, since a tunnel
+  URL is regenerated each time you restart the dev server.
+
 Point the app at your backend. Edit `frontend/.env.local`:
 
 ```
@@ -95,17 +113,24 @@ EXPO_PUBLIC_API_BASE_URL=http://<your-computer-ip>:8000
   - Tunnel (either OS): `cloudflared tunnel --url http://localhost:8000` or
     `ngrok http 8000`
 
-Start the dev server (same command on both OSes):
+Start the dev server with `--tunnel` (same command on both OSes) — this
+routes the connection through a public relay instead of plain LAN, so it
+works even if your phone and computer aren't on the same Wi-Fi or the
+network blocks phone-to-computer traffic (very common on corporate/campus/
+hotel Wi-Fi):
 
 ```bash
-npx expo start
+npx expo start --tunnel
 ```
 
+- First run installs `@expo/ngrok` if it isn't already present.
 - Scan the printed QR code with your phone's camera → opens in Expo Go.
-- Press `w` in the terminal (or run `npx expo start --web`) to open a web
-  preview instead.
-- If Expo Go can't reach the dev server, run `npx expo start --tunnel`
-  instead.
+- Press `w` in the terminal (or run `npx expo start --web --tunnel`) to open
+  a web preview instead.
+- If you're sure phone and computer are on the same, unrestricted Wi-Fi, you
+  can drop `--tunnel` for a slightly faster plain `npx expo start` — but
+  `--tunnel` is the reliable default and what `EXPO_PUBLIC_API_BASE_URL`
+  above assumes if you tunneled the backend too.
 
 More detail on the Expo Go workflow: [`frontend/SETUP.md`](./frontend/SETUP.md).
 

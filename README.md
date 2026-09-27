@@ -22,8 +22,44 @@ to **stub mode**, which needs no ML setup and works out of the box.
   - macOS: `brew install ffmpeg`
   - Windows: `winget install ffmpeg` (or `choco install ffmpeg`), then open a
     **new** terminal so `PATH` picks it up
+- [**Git LFS**](https://git-lfs.com) — needed to pull the shared reference
+  library and model files (see below)
+  - macOS: `brew install git-lfs`
+  - Windows: `winget install GitHub.GitLFS` (or `choco install git-lfs`),
+    then open a **new** terminal
+  - Either OS, one-time after install: `git lfs install`
 - An iPhone/Android phone with the **Expo Go** app, if you want to run on a
   physical device (a web preview also works, see below)
+
+## 0. Reference data & models (Git LFS)
+
+The exercise reference library (`backend/data/library/`) and the SMPL body
+model files (`backend/pose/models/smpl/*.pkl`) are the shared dataset the
+comparison pipeline runs against. They're tracked with **Git LFS** instead of
+as regular commits, so `git clone` pulls the exact same data for everyone
+without bloating normal git history.
+
+If you installed Git LFS *before* cloning, this happens automatically. If you
+already had the repo cloned, or `git clone` ran before LFS was installed, pull
+the actual file contents explicitly:
+
+```bash
+cd TaskMaster
+git lfs pull
+```
+
+Verify it worked — these should be real file sizes, not ~130-byte pointer
+stubs:
+
+```bash
+ls -lh backend/data/library/*/video.mp4 backend/pose/models/smpl/*.pkl
+```
+
+> **Note on the SMPL files:** SMPL's own license (smpl.is.tue.mpg.de)
+> normally prohibits redistributing those model files. They're committed
+> here only because this repo is private and the team has permission to
+> share internally — don't make this repo public (or fork it publicly)
+> without stripping `backend/pose/models/smpl/*.pkl` from history first.
 
 ## 1. Backend
 
@@ -60,8 +96,10 @@ Notes:
 - **Stub mode is on by default** (`TASKMASTER_STUB=1`) — pose comparison runs
   against synthetic data so you can exercise the whole API/app without any ML
   environment. See "Real pose pipeline" below to turn it off.
-- Uploaded videos, the reference library, and job outputs are written under
-  `backend/data/` and served back at `/files/...`.
+- Uploads and job outputs (per-machine, not shared) are written under
+  `backend/data/uploads` and `backend/data/outputs`, and served back at
+  `/files/...`. The reference library at `backend/data/library` is the
+  shared, checked-in dataset — see "Reference data & models" above.
 - Config is via env vars (see `backend/app/config.py`), e.g.
   `TASKMASTER_MAX_UPLOAD_MB`, `TASKMASTER_MAX_DURATION_S`,
   `TASKMASTER_CORS`. None are required to get started.
@@ -172,7 +210,6 @@ pipeline. See the comments in `backend/app/pipeline/runner.py` for how the
 fallback works.
 
 ROMP/SMPL-based 3D body fitting (`pose/requirements-romp.txt`) is a further
-optional, heavier layer — requires Python 3.11 specifically and SMPL model
-files that are license-gated and not redistributed in this repo (see
-`backend/.gitignore`). Only set this up if you're working on that part of the
-pipeline.
+optional, heavier layer — requires Python 3.11 specifically. The SMPL model
+files it needs are pulled via Git LFS (see "Reference data & models" above);
+only set this layer up if you're working on that part of the pipeline.

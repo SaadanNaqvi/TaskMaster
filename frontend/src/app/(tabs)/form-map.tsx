@@ -83,7 +83,7 @@ export default function FormMapScreen() {
             </View>
           </Card>
 
-          <Text style={styles.sectionTitle}>Max deviation vs {lastJob.referenceName.split(' ')[0]}</Text>
+          <Text style={styles.sectionTitle}>Max deviation vs {lastJob.referenceName}</Text>
           {perJoint.length === 0 ? (
             <Text style={styles.emptyText}>No per-joint data returned for this job.</Text>
           ) : (

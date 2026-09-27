@@ -28,8 +28,7 @@ export default function ScoreRing({ score, size = 64, strokeWidth = 7 }: Props) 
           strokeWidth={strokeWidth}
           strokeLinecap="round"
           strokeDasharray={`${circumference * (score / 100)} ${circumference}`}
-          rotation={-90}
-          origin={`${c}, ${c}`}
+          transform={`rotate(-90 ${c} ${c})`}
         />
       </Svg>
       <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>

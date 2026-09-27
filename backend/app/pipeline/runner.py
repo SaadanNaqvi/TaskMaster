@@ -48,7 +48,7 @@ def _find_rep(pose, exercise: str):
 def _compare(user, user_rep, ref, ref_rep):
     # Sync/align/score are the skeleton angle comparison — pure Python over already-extracted
     # poses, so like _find_rep they always run for real regardless of STUB_MODE (a stubbed
-    # comparison would just show made-up degrees).
+    # comparison would just show made-up degrees). #..
     if pipeline_real is None:
         raise NotImplementedError("Real pipeline not available")
     pairs = pipeline_real.sync(user, user_rep, ref, ref_rep)

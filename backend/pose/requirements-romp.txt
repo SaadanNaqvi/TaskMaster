@@ -1,0 +1,9 @@
+# ROMP's dependency stack (torch, its own cython/lap-based NMS extension) targets CPython 3.9-3.11
+# — use a .venv-romp built with python3.11, not whatever `python3` defaults to. Install with
+# `pip install --no-build-isolation -r pose/requirements.txt` after `pip install cython numpy lap`
+# (simple_romp's build backend can't see build-isolated dependencies for its own Cython extension).
+torch
+torchvision
+simple_romp
+opencv-python
+numpy

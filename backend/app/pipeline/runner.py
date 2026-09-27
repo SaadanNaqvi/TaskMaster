@@ -23,19 +23,26 @@ RUNNER_LOCK = threading.Semaphore(MAX_CONCURRENT_JOBS)
 
 
 def _extract_pose(video_path: str | Path):
-    if STUB_MODE:
-        return stubs.extract_pose(Path(video_path))
-    if pipeline_real is None:
-        raise NotImplementedError("Real pipeline not available")
-    return pipeline_real.extract_pose(Path(video_path))
+    # Unlike sync/align/score below, real pose extraction doesn't depend on STUB_MODE being
+    # turned off — it's genuinely implemented, has no bearing on whether the rest of the (still
+    # partly stubbed) pipeline can run, and real landmarks are what the mobile app's 3D overlay
+    # needs to actually align to the user (see frontend/src/lib/smpl/align.ts). It opportunistically
+    # uses the real MediaPipe environment when set up, falling back to the synthetic stub only when
+    # that environment isn't available (e.g. a fresh clone with no .venv-pose yet) — so this never
+    # turns "the app doesn't work out of the box" into a hard requirement.
+    if pipeline_real is not None and pipeline_real.mediapipe_available():
+        return pipeline_real.extract_pose(Path(video_path))
+    return stubs.extract_pose(Path(video_path))
 
 
 def _find_rep(pose, exercise: str):
-    if STUB_MODE:
-        return stubs.find_rep(pose, exercise)
-    if pipeline_real is None:
-        raise NotImplementedError("Real pipeline not available")
-    return pipeline_real.find_rep(pose, exercise)
+    # Pure Python over already-extracted pose data, no external environment dependency — always
+    # use the real hip-height-peak algorithm, including over the stub's synthetic pose above (its
+    # sinusoidal fake motion still has a well-defined deepest frame, more meaningful than the
+    # stub's own naive len//2 guess).
+    if pipeline_real is not None:
+        return pipeline_real.find_rep(pose, exercise)
+    return stubs.find_rep(pose, exercise)
 
 
 def _sync(user, user_rep, ref, ref_rep):

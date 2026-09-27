@@ -1,5 +1,6 @@
 # Python environments and generated files
 **/.venv/
+**/.venv-*/
 **/venv/
 **/env/
 **/ENV/
@@ -29,3 +30,4 @@
 *.tflite
 *.task
 !backend/pose/pose_landmarker_full.task
+

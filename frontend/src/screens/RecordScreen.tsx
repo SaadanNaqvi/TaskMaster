@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { Accelerometer } from 'expo-sensors';
 import { framingHint } from '../models/exercise';
 import { addClip } from '../services/clipLibrary';
 import { startJobFromClip } from '../services/jobs';
@@ -46,12 +47,36 @@ export default function RecordScreen({
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [zoomedIn, setZoomedIn] = useState(false);
+  const [tilt, setTilt] = useState<number | null>(null);
   const recordingStartedAt = useRef(0);
 
   useEffect(() => {
     if (!cameraPermission?.granted) requestCameraPermission();
     if (!micPermission?.granted) requestMicPermission();
   }, [cameraPermission, micPermission, requestCameraPermission, requestMicPermission]);
+
+  // Real device-orientation check (not pose detection) — flags when the phone itself isn't held
+  // upright/level for a consistent side-on shot, which is something we can actually measure today.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let subscription: { remove: () => void } | null = null;
+    let cancelled = false;
+    Accelerometer.isAvailableAsync().then((available) => {
+      if (cancelled || !available) return;
+      Accelerometer.setUpdateInterval(300);
+      subscription = Accelerometer.addListener(({ x, z }) => {
+        setTilt(Math.sqrt(x * x + z * z));
+      });
+    });
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
+  }, []);
+
+  const levelState: 'level' | 'close' | 'tilted' =
+    tilt === null ? 'level' : tilt < 0.12 ? 'level' : tilt < 0.28 ? 'close' : 'tilted';
+  const canRecord = levelState !== 'tilted';
 
   useEffect(() => {
     if (!isRecording) return;
@@ -68,6 +93,10 @@ export default function RecordScreen({
     }
     if (isRecording) {
       cameraRef.current?.stopRecording();
+      return;
+    }
+    if (!canRecord) {
+      Alert.alert('Hold the phone upright', 'Your phone is tilted too far to keep the frame consistent — level it out and try again.');
       return;
     }
     if (!cameraRef.current) return;
@@ -118,7 +147,7 @@ export default function RecordScreen({
   return (
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" mode="video" zoom={zoomedIn ? 0.35 : 0} />
-      <FramingGuideOverlay />
+      <FramingGuideOverlay isGoodFraming={canRecord} />
 
       <View style={styles.topOverlay}>
         <ScreenHeader
@@ -127,7 +156,7 @@ export default function RecordScreen({
           transparent
           right={
             <Chip background="rgba(0,0,0,0.5)" color={isRecording ? colors.red : colors.text} dot={isRecording ? colors.red : undefined}>
-              {isRecording ? formatElapsed(elapsed) : `vs ${referenceName.split(' ')[0]}`}
+              {isRecording ? formatElapsed(elapsed) : `vs ${referenceName}`}
             </Chip>
           }
         />
@@ -135,6 +164,14 @@ export default function RecordScreen({
         <View style={styles.tipRow}>
           <Chip background="rgba(200,245,60,0.16)" color={colors.lime}>Side-on</Chip>
           <Chip background="rgba(200,245,60,0.16)" color={colors.lime}>Full body + bar</Chip>
+          {!isRecording && tilt !== null && (
+            <Chip
+              background={levelState === 'level' ? 'rgba(200,245,60,0.16)' : 'rgba(255,181,71,0.18)'}
+              color={levelState === 'level' ? colors.lime : colors.amber}
+            >
+              {levelState === 'level' ? 'Phone level' : levelState === 'close' ? 'Almost level' : 'Tilted — level phone'}
+            </Chip>
+          )}
         </View>
       </View>
 
@@ -149,7 +186,11 @@ export default function RecordScreen({
             <Text style={styles.sideLabel}>Upload</Text>
           </Pressable>
 
-          <Pressable style={styles.recordButton} onPress={handlePress} disabled={!!busyLabel}>
+          <Pressable
+            style={[styles.recordButton, !isRecording && !canRecord && styles.recordButtonDisabled]}
+            onPress={handlePress}
+            disabled={!!busyLabel}
+          >
             <View style={isRecording ? styles.stopIcon : styles.recordIcon} />
           </Pressable>
 
@@ -236,6 +277,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  recordButtonDisabled: { opacity: 0.4 },
   recordIcon: { width: 60, height: 60, borderRadius: 30, backgroundColor: colors.red },
   stopIcon: { width: 30, height: 30, borderRadius: 8, backgroundColor: colors.red },
   savingOverlay: {

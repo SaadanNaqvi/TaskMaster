@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from starlette.staticfiles import StaticFiles
 
-from .config import CORS_ORIGINS, DATA_ROOT, ensure_data_dirs
+from .config import CORS_ORIGINS, DATA_ROOT, STUB_MODE, ensure_data_dirs
 from .errors import ApiError, api_error_handler, unhandled_exception_handler, validation_error_handler
 from .routers.exercises import router as exercises_router
 from .routers.jobs import router as jobs_router
@@ -39,7 +39,7 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict:
         ffmpeg_ok = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
-        return {"ok": True, "stub": True, "ffmpeg": ffmpeg_ok, "version": "0.1.0"}
+        return {"ok": True, "stub": STUB_MODE, "ffmpeg": ffmpeg_ok, "version": "0.1.0"}
 
     @app.on_event("startup")
     async def startup() -> None:

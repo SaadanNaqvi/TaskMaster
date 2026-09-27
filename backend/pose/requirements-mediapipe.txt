@@ -1,0 +1,12 @@
+# For .venv-pose — the 33-landmark MediaPipe extraction used by extract_pose_sequence.py and
+# pose_video.py. Kept separate from requirements-romp.txt (.venv-romp): mediapipe and ROMP's
+# torch/simple_romp stack don't need to coexist in one environment, and historically didn't play
+# well together version-wise.
+#
+# mediapipe 1.0.x has a confirmed macOS-only regression: Tasks Vision graphs (PoseLandmarker
+# included) abort with "DrishtiMetalHelper ... Service is unavailable" trying to init a Metal GPU
+# path that a CPU-only graph never registers — happens regardless of BaseOptions(delegate=CPU).
+# See https://github.com/google-ai-edge/mediapipe/issues/6356. Pinning below 1.0 avoids it.
+mediapipe>=0.10.30,<1.0
+opencv-python
+numpy

@@ -27,6 +27,8 @@ export type ApiReference = {
   source: 'pro' | 'user';
   video_url: string;
   thumbnail_url: string;
+  /** SMPL/ROMP pose sequence URL for the 3D mesh overlay — absent if extraction wasn't run or failed. */
+  smpl_pose_url?: string | null;
 };
 
 export type ApiJobStatus = {
@@ -52,12 +54,27 @@ export type ApiFormReport = {
   flags: ApiFormFlag[];
 };
 
+/** One frame of MediaPipe's 33-landmark pose (pixel coords, matching the video it was extracted
+ * from) — backend/app/schemas.py::PoseFrame. */
+export type ApiPoseFrame = {
+  t: number;
+  landmarks: (number[] | null)[];
+};
+
+/** backend/app/schemas.py::PoseSequence. */
+export type ApiPoseSequence = {
+  fps: number;
+  width: number;
+  height: number;
+  frames: ApiPoseFrame[];
+};
+
 export type ApiJobResult = {
   job_id: string;
   video_url: string;
   form_report: ApiFormReport;
-  user_pose: unknown;
-  ref_pose: unknown;
+  user_pose: ApiPoseSequence;
+  ref_pose: ApiPoseSequence;
   alignment: unknown[];
   exercise: string;
 };

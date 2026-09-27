@@ -26,7 +26,8 @@
     "plugins": [
       "expo-video",
       "expo-router",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-asset"
     ]
   }
 }

@@ -1,15 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import Screen from '../../components/ui/Screen';
 import ScreenHeader from '../../components/ui/ScreenHeader';
 import Card from '../../components/ui/Card';
+import Chip from '../../components/ui/Chip';
 import ScoreRing from '../../components/ui/ScoreRing';
 import { PlayIcon, ShareIcon } from '../../components/icons/MiscIcons';
-import { ApiJobResult, getJobResult, mediaUrl } from '../../services/apiGateway';
+import Smpl3DOverlay, { Smpl3DOverlayHandle } from '../../components/three/Smpl3DOverlay';
+import { ApiJobResult, getJobResult, getJobStatus, getReferences, mediaUrl } from '../../services/apiGateway';
+import { useCatalogue, findExerciseName } from '../../services/catalogue';
 import { useAnalysis } from '../../state/AnalysisContext';
 import { formatJointName } from '../../utils/jointNames';
+import { SmplPose } from '../../lib/smpl/types';
 import { colors, radii } from '../../theme/colors';
 import { font } from '../../theme/typography';
 
@@ -17,10 +21,18 @@ export default function ResultsRoute() {
   const { jobId } = useLocalSearchParams<{ jobId: string }>();
   const router = useRouter();
   const { getJob } = useAnalysis();
+  const { exercises } = useCatalogue();
 
   const cached = getJob(jobId);
   const [result, setResult] = useState<ApiJobResult | null>(cached?.result ?? null);
   const [error, setError] = useState<string | null>(null);
+  const [fallbackReferenceName, setFallbackReferenceName] = useState<string | null>(null);
+  const [refSmplPose, setRefSmplPose] = useState<{
+    poseSequence: SmplPose[];
+    translations: [number, number, number][];
+    fps: number;
+  } | null>(null);
+  const [refSmplPoseUrl, setRefSmplPoseUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (result) return;
@@ -29,14 +41,82 @@ export default function ResultsRoute() {
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load result'));
   }, [jobId, result]);
 
-  const exerciseName = cached?.exerciseName ?? result?.exercise ?? 'Exercise';
-  const referenceName = cached?.referenceName ?? 'reference';
+  // Looks up the reference used for this job — always needed for the 3D overlay's real pose data,
+  // and (when opened cold, e.g. a deep link) for the name too, since the normal navigation flow
+  // already carries that along as a param instead.
+  useEffect(() => {
+    if (!result) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const referenceId = cached?.referenceId ?? (await getJobStatus(jobId)).reference_id;
+        if (!referenceId) return;
+        const refs = await getReferences(result.exercise);
+        const match = refs.find((r) => r.id === referenceId);
+        if (!match || cancelled) return;
+        if (!cached) setFallbackReferenceName(match.name);
+        if (!match.smpl_pose_url) return;
+        setRefSmplPoseUrl(match.smpl_pose_url);
+        const response = await fetch(mediaUrl(match.smpl_pose_url)!);
+        const json = await response.json();
+        if (cancelled) return;
+        setRefSmplPose({
+          poseSequence: json.frames.map((f: { pose: number[] }) => Float32Array.from(f.pose)),
+          translations: json.frames.map((f: { trans: [number, number, number] }) => f.trans),
+          fps: json.fps,
+        });
+      } catch {
+        // best-effort only — falls back to the generic name / placeholder overlay animation
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cached, result, jobId]);
+
+  const exerciseName = cached?.exerciseName ?? findExerciseName(exercises, result?.exercise);
+  const referenceName = cached?.referenceName ?? fallbackReferenceName ?? 'reference';
   const videoUri = mediaUrl(result?.video_url);
 
   const player = useVideoPlayer(videoUri ?? null, (p) => {
     p.loop = true;
   });
   const [isPlaying, setIsPlaying] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const overlayRef = useRef<Smpl3DOverlayHandle>(null);
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+  const dragLastX = useRef(0);
+
+  // Shares one touch target between tap-to-play/pause and drag-to-rotate-the-3D-overlay-while-
+  // paused, rather than stacking a second responder on top of this one — reliably making plain
+  // taps "fall through" a view that sits on top for drag purposes is fragile in RN's responder
+  // system, so tap-vs-drag is disambiguated once, here, by total movement on release.
+  // eslint-disable-next-line react-hooks/refs
+  const [videoTouchResponder] = useState(() =>
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        dragLastX.current = 0;
+      },
+      onPanResponderMove: (_evt, gesture) => {
+        if (isPlayingRef.current) return;
+        overlayRef.current?.rotateBy((gesture.dx - dragLastX.current) * 0.01);
+        dragLastX.current = gesture.dx;
+      },
+      onPanResponderRelease: (_evt, gesture) => {
+        const moved = Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4;
+        if (moved) return;
+        if (isPlayingRef.current) {
+          player.pause();
+        } else {
+          player.play();
+        }
+        setIsPlaying(!isPlayingRef.current);
+      },
+    })
+  );
 
   const handleShare = () => {
     if (!result) return;
@@ -90,23 +170,53 @@ export default function ResultsRoute() {
         <View style={styles.videoWrap}>
           {videoUri ? (
             <>
-              <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" />
-              <Pressable
-                style={styles.playOverlay}
-                onPress={() => {
-                  if (isPlaying) {
-                    player.pause();
-                  } else {
-                    player.play();
-                  }
-                  setIsPlaying(!isPlaying);
-                }}
-              >
+              <VideoView
+                player={player}
+                style={[StyleSheet.absoluteFill, styles.video]}
+                contentFit="cover"
+              />
+              {showOverlay && (
+                <View style={styles.overlaySvgWrap} pointerEvents="none">
+                  <Smpl3DOverlay
+                    ref={overlayRef}
+                    opacity={0.85}
+                    poseSequence={refSmplPose?.poseSequence}
+                    translations={refSmplPose?.translations}
+                    fps={refSmplPose?.fps}
+                    player={player}
+                    userPoseFrames={result.user_pose.frames}
+                    userVideoWidth={result.user_pose.width}
+                    userVideoHeight={result.user_pose.height}
+                  />
+                </View>
+              )}
+              <View style={styles.playOverlay} {...videoTouchResponder.panHandlers}>
                 {!isPlaying && (
                   <View style={styles.playBtnBig}>
                     <PlayIcon size={20} />
                   </View>
                 )}
+              </View>
+              <Pressable style={styles.overlayToggle} onPress={() => setShowOverlay((v) => !v)}>
+                <Chip background="rgba(0,0,0,0.6)" dot={colors.lime}>
+                  {showOverlay
+                    ? refSmplPose
+                      ? `3D overlay · ${referenceName}`
+                      : '3D preview overlay · placeholder'
+                    : 'Overlay hidden'}
+                </Chip>
+              </Pressable>
+              <Pressable
+                style={styles.viewerButton}
+                onPress={() =>
+                  router.push(
+                    refSmplPoseUrl
+                      ? `/viewer?smplPoseUrl=${encodeURIComponent(refSmplPoseUrl)}&referenceName=${encodeURIComponent(referenceName)}`
+                      : '/viewer'
+                  )
+                }
+              >
+                <Chip background="rgba(0,0,0,0.6)">Open 3D view ↗</Chip>
               </Pressable>
             </>
           ) : (
@@ -167,6 +277,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   videoWrap: { height: 320, marginHorizontal: 20, borderRadius: radii.xl, overflow: 'hidden', backgroundColor: colors.s1 },
+  video: { width: '100%', height: '100%' },
+  overlaySvgWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  overlayToggle: { position: 'absolute', left: 12, bottom: 12 },
+  viewerButton: { position: 'absolute', right: 12, bottom: 12 },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   playBtnBig: {
     width: 56,

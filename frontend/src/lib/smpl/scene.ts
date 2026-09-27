@@ -2,14 +2,27 @@ import * as THREE from 'three';
 import { parseSmplAsset, SmplAsset, SmplAssetJson } from './types';
 import { SmplPoser } from './skinning';
 
+// How far the outline shell sits outside the real surface, as a fraction of the body's own scale
+// (uniform scale around the body's local origin, not a true per-vertex normal offset — cheap, and
+// looks right for a roughly-centered humanoid; a genuinely uniform-width outline on thin parts
+// like fingers would need real normal-offsetting, not worth it here).
+const OUTLINE_SCALE = 1.06;
+
 export interface SmplScene {
   asset: SmplAsset;
   poser: SmplPoser;
   scene: THREE.Scene;
+  /** Depth-only — invisible (colorWrite disabled), just occludes so `outline` doesn't show through
+   * the middle of the body. Don't put a visible material on this; see `outline` for that. */
   mesh: THREE.Mesh;
-  /** Wraps `mesh` — manipulate this (not `mesh` directly) to position/scale/rotate the whole body
-   * as a unit, e.g. for screen-space alignment (lib/smpl/align.ts), while `mesh`'s own vertex
-   * positions stay purely a function of the current pose. */
+  /** The actual visible part: a slightly enlarged, back-faces-only shell in the body color. Shares
+   * `mesh`'s geometry, so posing updates both at once. Combined with `mesh` above (the standard
+   * "inverted hull" toon-outline technique), this reads as a hollow outline of the body instead of
+   * a solid filled mesh — the see-through interior is intentional. */
+  outline: THREE.Mesh;
+  /** Wraps both meshes — manipulate this (not `mesh`/`outline` directly) to position/scale/rotate
+   * the whole body as a unit, e.g. for screen-space alignment (lib/smpl/align.ts), while their own
+   * vertex positions stay purely a function of the current pose. */
   group: THREE.Group;
   geometry: THREE.BufferGeometry;
   positions: Float32Array;
@@ -44,18 +57,26 @@ export function createSmplScene(json: SmplAssetJson, color: THREE.ColorRepresent
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setIndex(Array.from(asset.faces));
 
-  const material = new THREE.MeshLambertMaterial({
+  const occluderMaterial = new THREE.MeshBasicMaterial({ colorWrite: false });
+  const mesh = new THREE.Mesh(geometry, occluderMaterial);
+  mesh.renderOrder = 0;
+
+  const outlineMaterial = new THREE.MeshBasicMaterial({
     color: new THREE.Color(color),
+    side: THREE.BackSide,
     transparent: opacity < 1,
     opacity,
-    side: THREE.DoubleSide,
   });
-  const mesh = new THREE.Mesh(geometry, material);
+  const outline = new THREE.Mesh(geometry, outlineMaterial);
+  outline.scale.setScalar(OUTLINE_SCALE);
+  outline.renderOrder = 1;
+
   const group = new THREE.Group();
   group.add(mesh);
+  group.add(outline);
   scene.add(group);
 
-  return { asset, poser, scene, mesh, group, geometry, positions, bounds };
+  return { asset, poser, scene, mesh, outline, group, geometry, positions, bounds };
 }
 
 export function lerpPose(a: Float32Array, b: Float32Array, t: number): Float32Array {

@@ -14,7 +14,7 @@ The project has two parts:
 This guide gets both running locally on **macOS** or **Windows**. It defaults
 to **stub mode**, which needs no ML setup and works out of the box.
 
-## Prerequisites WARNING: Confirmed working on MAC, try windows at your own discression
+## Prerequisites WARNING: Confirmed working on MAC and WSL!!
 
 - Python 3.11+ and `pip`
 - Node.js 20+ and `npm`

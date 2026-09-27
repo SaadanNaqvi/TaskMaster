@@ -26,6 +26,7 @@ to **stub mode**, which needs no ML setup and works out of the box.
   library and model files (see below)
   - macOS: `brew install git-lfs`
   - Windows: `winget install GitHub.GitLFS` (or `choco install git-lfs`),
+  - Linux: `sudo apt install git-lfs`,
     then open a **new** terminal
   - Either OS, one-time after install: `git lfs install`
 - An iPhone/Android phone with the **Expo Go** app, if you want to run on a
@@ -109,7 +110,7 @@ Notes:
 - Full endpoint docs: [`backend/API.md`](./backend/API.md).
 - Run tests with `pytest` (from `backend/`, venv active).
 
-## 2. Frontend (Expo app)
+## 2. Frontend (Expo app) DOWNLOAD EXPO ONLY WORKS FOR IPHONES
 
 In a second terminal:
 
